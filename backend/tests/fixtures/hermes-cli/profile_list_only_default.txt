@@ -1,0 +1,4 @@
+
+ Profile          Model                        Gateway      Alias
+ ───────────────    ───────────────────────────    ───────────    ────────────
+ ◆default         MiniMax-M2.7                 running      —

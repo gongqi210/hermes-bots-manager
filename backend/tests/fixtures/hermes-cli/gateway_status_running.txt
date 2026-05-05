@@ -1,0 +1,7 @@
+Launchd plist: /Users/example/Library/LaunchAgents/ai.hermes.gateway.plist
+⚠ Service definition is stale relative to the current Hermes install
+✓ Gateway service is loaded
+{
+    "Label" = "ai.hermes.gateway";
+    "PID" = 2909;
+};

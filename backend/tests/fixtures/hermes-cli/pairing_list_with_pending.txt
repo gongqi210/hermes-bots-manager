@@ -1,0 +1,8 @@
+
+  No pending pairing requests.
+
+  Approved Users (2):
+  Platform     User ID              Name                
+  --------     -------              ----                
+  feishu       ou_fixtureuser000000000001                     
+  feishu       ou_fixtureuser000000000002                     

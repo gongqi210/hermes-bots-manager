@@ -1,0 +1,1 @@
+FEISHU_ALLOWED_USERS=ou_xxx,ou_yyy

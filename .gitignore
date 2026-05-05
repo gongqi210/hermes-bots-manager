@@ -1,0 +1,50 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.coverage
+backend/htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/*.tsbuildinfo
+
+# Secrets and local runtime config
+*.key
+.env
+.env.*
+.env.local
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# SQLite runtime
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Runtime logs / pid files
+*.log
+*.pid
+
+# Local parallel execution worktrees
+.worktrees/
+.claude/worktrees/
+.claude/settings.local.json
+
+# IDE/OS
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db

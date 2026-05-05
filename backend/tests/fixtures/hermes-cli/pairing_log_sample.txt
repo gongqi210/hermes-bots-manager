@@ -1,0 +1,1 @@
+UNAVAILABLE: No live Feishu pairing event was present in this workspace on 2026-05-04, and autonomous execution cannot fabricate a pairing-code log line. Capture on a real Hermes/Feishu pairing run before replacing the fallback regex.

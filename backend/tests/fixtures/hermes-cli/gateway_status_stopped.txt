@@ -1,0 +1,2 @@
+Launchd plist: /Users/example/Library/LaunchAgents/ai.hermes.gateway.plist
+✗ Gateway service is not running

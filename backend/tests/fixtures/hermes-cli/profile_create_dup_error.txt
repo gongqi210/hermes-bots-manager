@@ -1,0 +1,1 @@
+Error: Profile 'test-research-probe' already exists at /Users/example/.hermes/profiles/test-research-probe

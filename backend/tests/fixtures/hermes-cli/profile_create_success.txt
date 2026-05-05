@@ -1,0 +1,2 @@
+✓ Created profile 'test-research-probe' at /Users/example/.hermes/profiles/test-research-probe
+77 bundled skills synced.

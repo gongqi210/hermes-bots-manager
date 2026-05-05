@@ -1,0 +1,6 @@
+
+  Code 'TESTNOTREAL' not found or expired for platform 'feishu'.
+  Run 'hermes pairing list' to see pending codes.
+
+
+exit=0

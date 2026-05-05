@@ -1,0 +1,1 @@
+UNAVAILABLE: Local gateway.log contains credential-bearing Feishu websocket URLs and user message content, and no live pairing-code context was present. Do not commit raw gateway.log lines; re-capture a sanitized real sample on a Hermes box.

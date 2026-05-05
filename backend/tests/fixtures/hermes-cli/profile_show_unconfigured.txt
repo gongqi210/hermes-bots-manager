@@ -1,0 +1,7 @@
+Profile: test-research-probe
+Path:    /Users/example/.hermes/profiles/test-research-probe
+Gateway: stopped
+Skills:  77
+.env:    not configured
+SOUL.md: exists
+Alias:   /Users/example/.local/bin/test-research-probe

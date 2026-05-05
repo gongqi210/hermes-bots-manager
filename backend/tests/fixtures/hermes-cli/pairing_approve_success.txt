@@ -1,0 +1,2 @@
+UNAVAILABLE: No pending pairing code was available in this workspace on 2026-05-04, so a real approve-success stdout could not be captured without fabricating a live Feishu pairing.
+exit=UNAVAILABLE

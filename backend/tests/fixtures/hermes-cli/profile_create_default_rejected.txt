@@ -1,0 +1,1 @@
+Error: Cannot create a profile named 'default' — it is the built-in profile (~/.hermes).

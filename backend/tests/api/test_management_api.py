@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import pytest
 import pytest_asyncio
 import yaml
 from fastapi import FastAPI
@@ -102,6 +103,7 @@ async def test_model_config_get_empty(
         "base_url": None,
         "api_mode": None,
         "is_chatgpt_auth": False,
+        "providers": [],
     }
 
 
@@ -116,8 +118,6 @@ async def test_model_config_put_chatgpt_auth_marks_flag(
         json={
             "provider": "openai-codex",
             "model": "gpt-5.5",
-            "base_url": "https://chatgpt.com/backend-api/codex",
-            "api_mode": "codex_responses",
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -144,8 +144,6 @@ async def test_model_config_put_preserves_unknown_keys(
         json={
             "provider": "openai-codex",
             "model": "gpt-5.5",
-            "base_url": "https://chatgpt.com/backend-api/codex",
-            "api_mode": "codex_responses",
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -162,12 +160,57 @@ async def test_model_config_viewer_cannot_put(
     viewer_token = await _make_user(client, owner_token, "viewer1", "Viewer")
     r = await client.put(
         "/api/v1/bots/foo/model-config",
-        json={
-            "provider": "openai-codex",
-            "model": "gpt-5.5",
-            "base_url": "https://chatgpt.com/backend-api/codex",
-            "api_mode": "codex_responses",
-        },
+        json={"provider": "openai-codex", "model": "gpt-5.5"},
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert r.status_code == 403
+
+
+async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
+    client: AsyncClient,
+    fake_host: InMemoryHostOps,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.v1 import management as management_api
+
+    await _seed_bot(session)
+    fake_host.fs[_profile_config_path("foo")] = "feishu:\n  domain: feishu\n"
+    token = await _bootstrap_owner(client)
+
+    def fake_start_codex_auth_session() -> dict[str, int | str]:
+        return {
+            "authorization_url": "https://auth.openai.com/oauth/authorize?state=test",
+            "process_id": 123,
+        }
+
+    monkeypatch.setattr(
+        management_api,
+        "start_codex_auth_session",
+        fake_start_codex_auth_session,
+    )
+    r = await client.post(
+        "/api/v1/bots/foo/model-config/chatgpt-auth/start",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["authorization_url"] == "https://auth.openai.com/oauth/authorize?state=test"
+    assert body["process_id"] == 123
+    assert "Codex auth" in body["message"]
+    assert yaml.safe_load(fake_host.fs[_profile_config_path("foo")]) == {
+        "feishu": {"domain": "feishu"}
+    }
+
+
+async def test_chatgpt_auth_start_requires_editor(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    await _seed_bot(session)
+    owner_token = await _bootstrap_owner(client)
+    viewer_token = await _make_user(client, owner_token, "viewer2", "Viewer")
+    r = await client.post(
+        "/api/v1/bots/foo/model-config/chatgpt-auth/start",
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert r.status_code == 403

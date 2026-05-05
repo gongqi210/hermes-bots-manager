@@ -14,6 +14,7 @@ from app.schemas.gateway import (
 )
 from app.schemas.management import (
     AuditEntry,
+    ChatgptAuthStartOut,
     HealthOut,
     ModelConfigOut,
     ModelConfigUpdateIn,
@@ -30,6 +31,7 @@ __all__ = [
     "AllowlistOut",
     "AllowlistUpdateIn",
     "AuditEntry",
+    "ChatgptAuthStartOut",
     "GatewayActionRequest",
     "GatewayActionResponse",
     "GatewayState",

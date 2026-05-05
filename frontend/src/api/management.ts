@@ -7,6 +7,7 @@ import type {
   AllowlistPreset,
   AllowlistPresetsOut,
   AuditEntry,
+  ChatgptAuthStartOut,
   HealthOut,
   ModelConfigOut,
   ModelConfigUpdateIn,
@@ -35,12 +36,14 @@ export async function putModelConfig(
   return data;
 }
 
-export const CHATGPT_AUTH_DEFAULT: ModelConfigUpdateIn = {
-  provider: 'openai-codex',
-  model: 'gpt-5.5',
-  base_url: 'https://chatgpt.com/backend-api/codex',
-  api_mode: 'codex_responses',
-};
+export async function startChatgptAuth(
+  botName: string,
+): Promise<ChatgptAuthStartOut> {
+  const { data } = await apiClient.post<ChatgptAuthStartOut>(
+    `/bots/${encodeURIComponent(botName)}/model-config/chatgpt-auth/start`,
+  );
+  return data;
+}
 
 export async function getWorkspace(botName: string): Promise<WorkspaceOut> {
   const { data } = await apiClient.get<WorkspaceOut>(

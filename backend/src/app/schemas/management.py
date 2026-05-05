@@ -15,6 +15,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.gateway import GatewayState
 
 
+class ModelProviderOption(BaseModel):
+    """A Hermes-discovered provider and the curated models it exposes."""
+
+    slug: str
+    name: str
+    is_current: bool = False
+    is_user_defined: bool = False
+    is_configured: bool = False
+    models: list[str] = Field(default_factory=list)
+    total_models: int = 0
+    source: str = ""
+    base_url: str | None = None
+    api_mode: str | None = None
+    auth_type: str | None = None
+
+
 class ModelConfigOut(BaseModel):
     """``model.*`` slice of a Bot's ``config.yaml``.
 
@@ -29,6 +45,7 @@ class ModelConfigOut(BaseModel):
     base_url: str | None = None
     api_mode: str | None = None
     is_chatgpt_auth: bool = False
+    providers: list[ModelProviderOption] = Field(default_factory=list)
 
 
 class ModelConfigUpdateIn(BaseModel):
@@ -36,6 +53,12 @@ class ModelConfigUpdateIn(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     base_url: str | None = Field(default=None, max_length=512)
     api_mode: str | None = Field(default=None, max_length=64)
+
+
+class ChatgptAuthStartOut(BaseModel):
+    authorization_url: str
+    process_id: int
+    message: str
 
 
 class WorkspaceOut(BaseModel):

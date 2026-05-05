@@ -177,6 +177,20 @@ export interface PairingActionResponse {
 
 // --- Phase 5 management types ---
 
+export interface ModelProviderOption {
+  slug: string;
+  name: string;
+  is_current: boolean;
+  is_user_defined: boolean;
+  is_configured: boolean;
+  models: string[];
+  total_models: number;
+  source: string;
+  base_url: string | null;
+  api_mode: string | null;
+  auth_type: string | null;
+}
+
 export interface ModelConfigOut {
   bot_name: string;
   provider: string | null;
@@ -184,6 +198,7 @@ export interface ModelConfigOut {
   base_url: string | null;
   api_mode: string | null;
   is_chatgpt_auth: boolean;
+  providers: ModelProviderOption[];
 }
 
 export interface ModelConfigUpdateIn {
@@ -191,6 +206,12 @@ export interface ModelConfigUpdateIn {
   model: string;
   base_url?: string | null;
   api_mode?: string | null;
+}
+
+export interface ChatgptAuthStartOut {
+  authorization_url: string;
+  process_id: number;
+  message: string;
 }
 
 export type WorkspaceStatus = 'ok' | 'warning' | 'error' | 'unset';

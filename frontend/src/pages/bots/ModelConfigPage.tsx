@@ -1,15 +1,26 @@
 // Phase 5: Model configuration page (chat tab).
-// One-click ChatGPT auth subscription button is the canonical default. The
-// form below lets operators tweak the four fields by hand if they want a
-// different provider/base_url/model.
+// The ChatGPT auth action launches the Codex browser authorization flow. The
+// form below reflects Hermes' own provider/model catalog instead of exposing
+// transport-level fields as hand-written config.
 
-import { Alert, Button, Card, Form, Input, Space, Tag, Typography, message } from 'antd';
+import {
+  Alert,
+  AutoComplete,
+  Button,
+  Card,
+  Form,
+  Select,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  CHATGPT_AUTH_DEFAULT,
   getModelConfig,
   putModelConfig,
+  startChatgptAuth,
 } from '@/api/management';
 import type { ModelConfigUpdateIn } from '@/api/types';
 import { zhCN } from '@/i18n/zh-CN';
@@ -19,8 +30,6 @@ import HealthSummary from './HealthSummary';
 interface FormValues {
   provider: string;
   model: string;
-  base_url?: string;
-  api_mode?: string;
 }
 
 export default function ModelConfigPage({ botName }: { botName: string }) {
@@ -37,11 +46,44 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
       form.setFieldsValue({
         provider: data.provider ?? '',
         model: data.model ?? '',
-        base_url: data.base_url ?? '',
-        api_mode: data.api_mode ?? '',
       });
     }
   }, [data, form]);
+
+  const selectedProviderSlug = Form.useWatch('provider', form);
+  const providers = data?.providers ?? [];
+  const selectedProvider =
+    providers.find((provider) => provider.slug === selectedProviderSlug) ??
+    providers.find((provider) => provider.slug === data?.provider);
+  const toProviderOption = (provider: (typeof providers)[number]) => ({
+    value: provider.slug,
+    label: `${provider.name} (${provider.slug})`,
+  });
+  const configuredProviderOptions = providers
+    .filter((provider) => provider.is_configured)
+    .map(toProviderOption);
+  const builtinProviderOptions = providers
+    .filter((provider) => !provider.is_configured)
+    .map(toProviderOption);
+  const providerOptions = [
+    configuredProviderOptions.length
+      ? {
+          label: zhCN.modelConfig.configuredProvidersGroup,
+          options: configuredProviderOptions,
+        }
+      : null,
+    builtinProviderOptions.length
+      ? {
+          label: zhCN.modelConfig.builtinProvidersGroup,
+          options: builtinProviderOptions,
+        }
+      : null,
+  ].filter((group): group is NonNullable<typeof group> => group !== null);
+  const modelOptions = (selectedProvider?.models ?? []).map((model) => ({
+    value: model,
+    label: model,
+  }));
+  const showCodexAuth = selectedProviderSlug === 'openai-codex' || data?.provider === 'openai-codex';
 
   const saveM = useMutation({
     mutationFn: (payload: ModelConfigUpdateIn) => putModelConfig(botName, payload),
@@ -54,11 +96,10 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
   });
 
   const chatgptM = useMutation({
-    mutationFn: () => putModelConfig(botName, CHATGPT_AUTH_DEFAULT),
-    onSuccess: () => {
-      message.success(zhCN.modelConfig.chatgptAuthApplied);
-      qc.invalidateQueries({ queryKey: ['model-config', botName] });
-      qc.invalidateQueries({ queryKey: ['health', botName] });
+    mutationFn: () => startChatgptAuth(botName),
+    onSuccess: (result) => {
+      window.open(result.authorization_url, '_blank', 'noopener,noreferrer');
+      message.success(zhCN.modelConfig.chatgptAuthStarted);
     },
     onError: (e: unknown) => message.error(extractErrorMessage(e)),
   });
@@ -67,8 +108,6 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
     const payload: ModelConfigUpdateIn = {
       provider: values.provider.trim(),
       model: values.model.trim(),
-      base_url: values.base_url?.trim() || null,
-      api_mode: values.api_mode?.trim() || null,
     };
     saveM.mutate(payload);
   };
@@ -99,55 +138,113 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
           />
         )}
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Space
-            direction="vertical"
-            style={{
-              width: '100%',
-              padding: 12,
-              border: '1px solid #f0f0f0',
-              borderRadius: 6,
-              background: '#fafafa',
-            }}
-          >
-            <Typography.Text>{zhCN.modelConfig.chatgptAuthHint}</Typography.Text>
-            <Button
-              type="primary"
-              loading={chatgptM.isPending}
-              onClick={() => chatgptM.mutate()}
-              data-testid="btn-chatgpt-auth"
-            >
-              {zhCN.modelConfig.chatgptAuthBtn}
-            </Button>
-          </Space>
           <Form<FormValues>
             form={form}
             layout="vertical"
             onFinish={onSubmit}
             data-testid="model-config-form"
           >
+            {showCodexAuth && (
+              <Space
+                direction="vertical"
+                style={{
+                  width: '100%',
+                  marginBottom: 12,
+                  padding: 12,
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 6,
+                  background: '#fafafa',
+                }}
+              >
+                <Typography.Text>{zhCN.modelConfig.chatgptAuthHint}</Typography.Text>
+                <Button
+                  type="primary"
+                  loading={chatgptM.isPending}
+                  onClick={() => chatgptM.mutate()}
+                  data-testid="btn-chatgpt-auth"
+                >
+                  {zhCN.modelConfig.chatgptAuthBtn}
+                </Button>
+              </Space>
+            )}
+            {!isLoading && providers.length === 0 && (
+              <Alert
+                type="info"
+                message={zhCN.modelConfig.noProviderOptions}
+                style={{ marginBottom: 12 }}
+                data-testid="no-provider-options"
+              />
+            )}
             <Form.Item
               label={zhCN.modelConfig.providerLabel}
               name="provider"
               rules={[{ required: true, message: zhCN.modelConfig.providerLabel }]}
             >
-              <Input placeholder="openai-codex" data-testid="input-provider" />
+              <Select
+                showSearch
+                options={providerOptions}
+                placeholder={zhCN.modelConfig.providerPlaceholder}
+                optionFilterProp="label"
+                data-testid="select-provider"
+                onChange={(slug) => {
+                  const nextProvider = providers.find((provider) => provider.slug === slug);
+                  const currentModel = form.getFieldValue('model');
+                  if (
+                    nextProvider?.models.length &&
+                    !nextProvider.models.includes(currentModel)
+                  ) {
+                    form.setFieldValue('model', nextProvider.models[0]);
+                  }
+                }}
+              />
             </Form.Item>
             <Form.Item
               label={zhCN.modelConfig.modelLabel}
               name="model"
               rules={[{ required: true, message: zhCN.modelConfig.modelLabel }]}
             >
-              <Input placeholder="gpt-5.5" data-testid="input-model" />
-            </Form.Item>
-            <Form.Item label={zhCN.modelConfig.baseUrlLabel} name="base_url">
-              <Input
-                placeholder="https://chatgpt.com/backend-api/codex"
-                data-testid="input-base-url"
+              <AutoComplete
+                options={modelOptions}
+                placeholder={zhCN.modelConfig.modelPlaceholder}
+                filterOption={(input, option) =>
+                  (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+                data-testid="input-model"
               />
             </Form.Item>
-            <Form.Item label={zhCN.modelConfig.apiModeLabel} name="api_mode">
-              <Input placeholder="codex_responses" data-testid="input-api-mode" />
-            </Form.Item>
+            {selectedProvider && (
+              <Space
+                direction="vertical"
+                size={4}
+                style={{
+                  width: '100%',
+                  marginBottom: 16,
+                  padding: 12,
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 6,
+                  background: '#fafafa',
+                }}
+                data-testid="provider-transport-summary"
+              >
+                <Typography.Text type="secondary">
+                  {zhCN.modelConfig.transportManaged}
+                </Typography.Text>
+                <Typography.Text>
+                  {zhCN.modelConfig.baseUrlLabel}: {selectedProvider.base_url ?? 'Hermes 默认'}
+                </Typography.Text>
+                <Typography.Text>
+                  {zhCN.modelConfig.apiModeLabel}: {selectedProvider.api_mode ?? 'Hermes 默认'}
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  {zhCN.modelConfig.providerSourceLabel}: {selectedProvider.source || 'Hermes'}
+                </Typography.Text>
+                {!selectedProvider.is_configured && (
+                  <Typography.Text type="warning">
+                    {zhCN.modelConfig.providerNeedsCredentials}
+                  </Typography.Text>
+                )}
+              </Space>
+            )}
             <Form.Item>
               <Button
                 type="primary"

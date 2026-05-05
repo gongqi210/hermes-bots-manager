@@ -10,26 +10,160 @@ release.
 
 from __future__ import annotations
 
+import contextlib
+import importlib
+import json
 import logging
 import os
+import pty
+import re
+import select
 import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import yaml
 from fastapi import HTTPException, status
 
 from app.adapters.hostops import HostOps
 from app.adapters.profile_fs import ProfileFsAdapter
-from app.schemas.management import SkillItem
+from app.schemas.management import ModelProviderOption, SkillItem
 
 logger = logging.getLogger(__name__)
 
 CHATGPT_AUTH_PROVIDER = "openai-codex"
 CHATGPT_AUTH_API_MODE = "codex_responses"
 CHATGPT_AUTH_BASE_URL = "https://chatgpt.com/backend-api/codex"
-CHATGPT_AUTH_DEFAULT_MODEL = "gpt-5.5"
 TERMINAL_CWD_ENV_KEY = "TERMINAL_CWD"
+_CODEX_AUTH_URL_RE = re.compile(r"https://auth\.openai\.com/oauth/authorize\?\S+")
+_RUNNING_CODEX_AUTH: dict[int, tuple[subprocess.Popen[bytes], int]] = {}
+_HERMES_PROVIDER_CATALOG_SCRIPT = r"""
+import json
+import sys
+import traceback
+
+from hermes_cli.config import load_config
+from hermes_cli.model_switch import list_authenticated_providers
+from hermes_cli.models import CANONICAL_PROVIDERS, _PROVIDER_MODELS
+from hermes_cli.providers import determine_api_mode, get_label, get_provider
+
+current_provider = sys.argv[1]
+current_model = sys.argv[2]
+preferred_provider = sys.argv[3]
+
+
+def coerce_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def coerce_list(value):
+    return value if isinstance(value, list) else []
+
+
+def build_option(
+    slug,
+    *,
+    name="",
+    models=None,
+    is_current=False,
+    is_user_defined=False,
+    is_configured=False,
+    source="",
+    api_url="",
+    current_model_for_provider="",
+):
+    pdef = get_provider(slug)
+    base_url = api_url or (pdef.base_url if pdef else "")
+    api_mode = determine_api_mode(slug, base_url)
+    auth_type = pdef.auth_type if pdef else ""
+    display_name = name or (pdef.name if pdef else get_label(slug))
+    provider_source = source or (pdef.source if pdef else "")
+
+    deduped_models = []
+    if current_model_for_provider:
+        deduped_models.append(current_model_for_provider)
+    for model_name in models or []:
+        model_name = str(model_name).strip()
+        if model_name and model_name not in deduped_models:
+            deduped_models.append(model_name)
+
+    return {
+        "slug": slug,
+        "name": display_name,
+        "is_current": is_current,
+        "is_user_defined": is_user_defined,
+        "is_configured": is_configured,
+        "models": deduped_models,
+        "total_models": max(len(deduped_models), len(models or [])),
+        "source": provider_source,
+        "base_url": base_url or None,
+        "api_mode": api_mode or None,
+        "auth_type": auth_type or None,
+    }
+
+
+try:
+    cfg = load_config()
+    model_cfg = coerce_dict(cfg.get("model"))
+    provider = current_provider or str(model_cfg.get("provider") or "")
+    model_name = current_model or str(model_cfg.get("default") or model_cfg.get("model") or "")
+    items = list_authenticated_providers(
+        current_provider=provider,
+        user_providers=coerce_dict(cfg.get("providers")) or None,
+        custom_providers=cfg.get("custom_providers")
+        if isinstance(cfg.get("custom_providers"), list)
+        else None,
+        max_models=50,
+    )
+    options = [
+        build_option(
+            str(item.get("slug") or ""),
+            name=str(item.get("name") or ""),
+            models=[str(m) for m in coerce_list(item.get("models"))],
+            is_current=bool(item.get("is_current")),
+            is_user_defined=bool(item.get("is_user_defined")),
+            is_configured=True,
+            source=str(item.get("source") or ""),
+            api_url=str(item.get("api_url") or ""),
+            current_model_for_provider=model_name
+            if item.get("slug") == provider
+            else "",
+        )
+        for item in items
+        if item.get("slug")
+    ]
+    for provider_to_include in {provider, preferred_provider}:
+        if provider_to_include and not any(item["slug"] == provider_to_include for item in options):
+            options.append(
+                build_option(
+                    provider_to_include,
+                    models=[str(m) for m in coerce_list(_PROVIDER_MODELS.get(provider_to_include))],
+                    is_current=provider_to_include == provider,
+                    is_configured=provider_to_include == provider,
+                    current_model_for_provider=model_name
+                    if provider_to_include == provider
+                    else "",
+                )
+            )
+    for provider_entry in CANONICAL_PROVIDERS:
+        if not any(item["slug"] == provider_entry.slug for item in options):
+            options.append(
+                build_option(
+                    provider_entry.slug,
+                    name=provider_entry.label,
+                    models=[str(m) for m in coerce_list(_PROVIDER_MODELS.get(provider_entry.slug))],
+                    source="hermes-builtin",
+                )
+            )
+    print(json.dumps({"providers": options}, ensure_ascii=False))
+except Exception:
+    traceback.print_exc(file=sys.stderr)
+    raise
+"""
 
 # Heuristic keywords that flip the "dangerous" flag for a skill. Operators
 # enabling such a skill must echo the bot name back as ``confirm_name``.
@@ -125,6 +259,467 @@ def merge_model_block(
         merged.pop("api_mode", None)
     new_doc["model"] = merged
     return new_doc
+
+
+@contextlib.contextmanager
+def _temporary_sys_path(path: Path) -> Iterator[None]:
+    path_text = str(path)
+    inserted = False
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
+        inserted = True
+    try:
+        yield
+    finally:
+        if inserted:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(path_text)
+
+
+@contextlib.contextmanager
+def _temporary_environ(values: Mapping[str, str]) -> Iterator[None]:
+    previous: dict[str, str | None] = {key: os.environ.get(key) for key in values}
+    try:
+        for key, value in values.items():
+            os.environ[key] = value
+        yield
+    finally:
+        for key, previous_value in previous.items():
+            if previous_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous_value
+
+
+def _hermes_agent_root(fs: ProfileFsAdapter) -> Path | None:
+    root = fs.hermes_home / "hermes-agent"
+    return root if (root / "hermes_cli").exists() else None
+
+
+def _hermes_agent_python(agent_root: Path) -> Path | None:
+    python_bin = agent_root / "venv" / "bin" / "python"
+    return python_bin if python_bin.exists() else None
+
+
+def _option_from_provider_def(
+    *,
+    slug: str,
+    name: str | None = None,
+    models: list[str] | None = None,
+    is_current: bool = False,
+    is_user_defined: bool = False,
+    is_configured: bool = False,
+    source: str = "",
+    api_url: str = "",
+    current_model: str | None = None,
+) -> ModelProviderOption:
+    base_url = api_url
+    api_mode = ""
+    auth_type = ""
+    display_name = name or slug
+    provider_source = source
+    try:
+        providers_mod = importlib.import_module("hermes_cli.providers")
+        pdef = providers_mod.get_provider(slug)
+        if pdef is not None:
+            display_name = name or pdef.name or providers_mod.get_label(slug)
+            base_url = base_url or pdef.base_url or ""
+            auth_type = pdef.auth_type
+            provider_source = provider_source or pdef.source
+        else:
+            display_name = name or providers_mod.get_label(slug)
+        api_mode = providers_mod.determine_api_mode(slug, base_url)
+    except Exception as exc:
+        logger.debug("Hermes provider resolution failed for %s: %s", slug, exc)
+        if slug == CHATGPT_AUTH_PROVIDER:
+            display_name = name or "OpenAI Codex"
+            base_url = base_url or CHATGPT_AUTH_BASE_URL
+            api_mode = CHATGPT_AUTH_API_MODE
+            auth_type = auth_type or "oauth_external"
+
+    deduped_models: list[str] = []
+    if current_model and current_model.strip():
+        deduped_models.append(current_model.strip())
+    for model_name in models or []:
+        model_name = str(model_name).strip()
+        if model_name and model_name not in deduped_models:
+            deduped_models.append(model_name)
+
+    return ModelProviderOption(
+        slug=slug,
+        name=display_name,
+        is_current=is_current,
+        is_user_defined=is_user_defined,
+        is_configured=is_configured,
+        models=deduped_models,
+        total_models=max(len(deduped_models), len(models or [])),
+        source=provider_source,
+        base_url=base_url or None,
+        api_mode=api_mode or None,
+        auth_type=auth_type or None,
+    )
+
+
+def _fallback_provider_option(
+    provider: str | None,
+    *,
+    model: str | None,
+    is_current: bool,
+    doc: dict[str, Any],
+) -> ModelProviderOption | None:
+    if not provider:
+        return None
+
+    base_url = ""
+    name = provider
+    is_user_defined = False
+    source = "config"
+    providers = _coerce_dict(doc.get("providers"))
+    provider_cfg = _coerce_dict(providers.get(provider))
+    if provider_cfg:
+        name = str(provider_cfg.get("name") or provider)
+        base_url = str(provider_cfg.get("api") or provider_cfg.get("url") or "")
+        is_user_defined = True
+        source = "user-config"
+    elif provider == CHATGPT_AUTH_PROVIDER:
+        name = "OpenAI Codex"
+        base_url = CHATGPT_AUTH_BASE_URL
+        source = "hermes"
+
+    api_mode = CHATGPT_AUTH_API_MODE if provider == CHATGPT_AUTH_PROVIDER else None
+    if provider_cfg and not api_mode:
+        api_mode = "chat_completions"
+
+    return ModelProviderOption(
+        slug=provider,
+        name=name,
+        is_current=is_current,
+        is_user_defined=is_user_defined,
+        is_configured=is_current or is_user_defined,
+        models=[model] if model else [],
+        total_models=1 if model else 0,
+        source=source,
+        base_url=base_url or None,
+        api_mode=api_mode,
+        auth_type="oauth_external" if provider == CHATGPT_AUTH_PROVIDER else None,
+    )
+
+
+def _ensure_provider_option(
+    options: list[ModelProviderOption],
+    provider: str | None,
+    *,
+    current_provider: str | None,
+    current_model: str | None,
+    doc: dict[str, Any],
+) -> list[ModelProviderOption]:
+    if not provider or any(item.slug == provider for item in options):
+        return options
+
+    option = _fallback_provider_option(
+        provider,
+        model=current_model if provider == current_provider else None,
+        is_current=provider == current_provider,
+        doc=doc,
+    )
+    if option is not None:
+        options.append(option)
+    return options
+
+
+def _list_model_provider_options_sync(
+    fs: ProfileFsAdapter,
+    name: str,
+    doc: dict[str, Any],
+    env: Mapping[str, str],
+    preferred_provider: str | None,
+) -> list[ModelProviderOption]:
+    block = extract_model_block(doc)
+    current_provider = str(block["provider"] or "")
+    current_model = str(block["model"] or "") or None
+    agent_root = _hermes_agent_root(fs)
+    if agent_root is None:
+        options: list[ModelProviderOption] = []
+        _ensure_provider_option(
+            options,
+            current_provider or preferred_provider,
+            current_provider=current_provider,
+            current_model=current_model,
+            doc=doc,
+        )
+        if preferred_provider and preferred_provider != current_provider:
+            _ensure_provider_option(
+                options,
+                preferred_provider,
+                current_provider=current_provider,
+                current_model=current_model,
+                doc=doc,
+            )
+        return options
+
+    subprocess_options = _list_model_provider_options_via_hermes_python(
+        agent_root=agent_root,
+        profile_dir=fs.profile_dir(name),
+        env=env,
+        current_provider=current_provider,
+        current_model=current_model or "",
+        preferred_provider=preferred_provider or "",
+    )
+    if subprocess_options is not None:
+        return subprocess_options
+
+    profile_env = {"HERMES_HOME": str(fs.profile_dir(name)), **env}
+    with _temporary_sys_path(agent_root), _temporary_environ(profile_env):
+        try:
+            config_mod = importlib.import_module("hermes_cli.config")
+            model_switch_mod = importlib.import_module("hermes_cli.model_switch")
+            models_mod = importlib.import_module("hermes_cli.models")
+
+            cfg = config_mod.load_config()
+            model_cfg = _coerce_dict(cfg.get("model"))
+            provider = current_provider or str(model_cfg.get("provider") or "")
+            model_name = current_model or str(model_cfg.get("default") or model_cfg.get("model") or "")
+            items = model_switch_mod.list_authenticated_providers(
+                current_provider=provider,
+                user_providers=_coerce_dict(cfg.get("providers")) or None,
+                custom_providers=cfg.get("custom_providers") if isinstance(cfg.get("custom_providers"), list) else None,
+                max_models=50,
+            )
+            options = [
+                _option_from_provider_def(
+                    slug=str(item.get("slug") or ""),
+                    name=str(item.get("name") or "") or None,
+                    models=[str(m) for m in _coerce_list(item.get("models"))],
+                    is_current=bool(item.get("is_current")),
+                    is_user_defined=bool(item.get("is_user_defined")),
+                    is_configured=True,
+                    source=str(item.get("source") or ""),
+                    api_url=str(item.get("api_url") or ""),
+                    current_model=model_name if item.get("slug") == provider else None,
+                )
+                for item in items
+                if item.get("slug")
+            ]
+            for provider_to_include in {provider, preferred_provider or ""}:
+                if provider_to_include and not any(item.slug == provider_to_include for item in options):
+                    models = [
+                        str(m)
+                        for m in _coerce_list(
+                            models_mod._PROVIDER_MODELS.get(provider_to_include)
+                        )
+                    ]
+                    options.append(
+                        _option_from_provider_def(
+                            slug=provider_to_include,
+                            models=models,
+                            is_current=provider_to_include == provider,
+                            is_configured=provider_to_include == provider,
+                            current_model=model_name if provider_to_include == provider else None,
+                        )
+                    )
+            for provider_entry in models_mod.CANONICAL_PROVIDERS:
+                if not any(item.slug == provider_entry.slug for item in options):
+                    models = [
+                        str(m)
+                        for m in _coerce_list(
+                            models_mod._PROVIDER_MODELS.get(provider_entry.slug)
+                        )
+                    ]
+                    options.append(
+                        _option_from_provider_def(
+                            slug=provider_entry.slug,
+                            name=provider_entry.label,
+                            models=models,
+                            source="hermes-builtin",
+                        )
+                    )
+            return options
+        except Exception as exc:
+            logger.warning("Failed to read Hermes provider catalog for %s: %s", name, exc)
+            options = []
+            for provider_to_include in {current_provider, preferred_provider or ""}:
+                _ensure_provider_option(
+                    options,
+                    provider_to_include,
+                    current_provider=current_provider,
+                    current_model=current_model,
+                    doc=doc,
+                )
+            return options
+
+
+def _list_model_provider_options_via_hermes_python(
+    *,
+    agent_root: Path,
+    profile_dir: Path,
+    env: Mapping[str, str],
+    current_provider: str,
+    current_model: str,
+    preferred_provider: str,
+) -> list[ModelProviderOption] | None:
+    python_bin = _hermes_agent_python(agent_root)
+    if python_bin is None:
+        return None
+    proc_env = os.environ.copy()
+    proc_env.update(env)
+    proc_env["HERMES_HOME"] = str(profile_dir)
+    existing_pythonpath = proc_env.get("PYTHONPATH", "")
+    proc_env["PYTHONPATH"] = (
+        str(agent_root) if not existing_pythonpath else f"{agent_root}:{existing_pythonpath}"
+    )
+    try:
+        proc = subprocess.run(
+            [
+                str(python_bin),
+                "-c",
+                _HERMES_PROVIDER_CATALOG_SCRIPT,
+                current_provider,
+                current_model,
+                preferred_provider,
+            ],
+            cwd=agent_root,
+            env=proc_env,
+            text=True,
+            capture_output=True,
+            timeout=12,
+            check=False,
+        )
+    except Exception as exc:
+        logger.warning("Failed to launch Hermes provider catalog helper: %s", exc)
+        return None
+    if proc.returncode != 0:
+        logger.warning("Hermes provider catalog helper failed: %s", proc.stderr.strip())
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+        return [
+            ModelProviderOption.model_validate(item)
+            for item in _coerce_list(payload.get("providers"))
+            if isinstance(item, dict)
+        ]
+    except Exception as exc:
+        logger.warning("Hermes provider catalog helper returned invalid JSON: %s", exc)
+        return None
+
+
+async def list_model_provider_options(
+    fs: ProfileFsAdapter,
+    name: str,
+    doc: dict[str, Any],
+    *,
+    preferred_provider: str | None = None,
+) -> list[ModelProviderOption]:
+    """Return Hermes-discovered provider choices for the model config UI.
+
+    The web console treats Hermes as the source of truth: provider labels,
+    curated models, base URLs, and API modes come from ``hermes_cli`` when the
+    local agent install is available. The fallback only mirrors the existing
+    profile config so the page remains usable in tests and partial installs.
+    """
+    env = await _read_model_provider_env(fs, name)
+    return _list_model_provider_options_sync(fs, name, doc, env, preferred_provider)
+
+
+async def _read_model_provider_env(fs: ProfileFsAdapter, name: str) -> dict[str, str]:
+    """Merge global Hermes credentials with profile-local overrides."""
+    env: dict[str, str] = {}
+    global_env_path = fs.hermes_home / ".env"
+    if await fs.host.path_exists(global_env_path):
+        text = await fs.host.read_text(global_env_path)
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            env[key.strip()] = value.strip()
+    env.update(await fs.read_env(name))
+    return env
+
+
+def selected_provider_transport(
+    options: list[ModelProviderOption],
+    provider: str,
+    body_base_url: str | None,
+    body_api_mode: str | None,
+) -> tuple[str | None, str | None]:
+    selected = next((option for option in options if option.slug == provider), None)
+    base_url = body_base_url if body_base_url is not None else selected.base_url if selected else None
+    api_mode = body_api_mode if body_api_mode is not None else selected.api_mode if selected else None
+    return base_url, api_mode
+
+
+class CodexAuthLaunch(TypedDict):
+    authorization_url: str
+    process_id: int
+
+
+def _prune_codex_auth_processes() -> None:
+    for pid, (proc, master_fd) in list(_RUNNING_CODEX_AUTH.items()):
+        if proc.poll() is not None:
+            _RUNNING_CODEX_AUTH.pop(pid, None)
+            with contextlib.suppress(OSError):
+                os.close(master_fd)
+
+
+def _read_pty_with_timeout(master_fd: int, timeout_seconds: float) -> str | None:
+    readable, _, _ = select.select([master_fd], [], [], timeout_seconds)
+    if not readable:
+        return None
+    try:
+        chunk = os.read(master_fd, 4096)
+    except OSError:
+        return None
+    if not chunk:
+        return None
+    return chunk.decode(errors="replace")
+
+
+def start_codex_auth_session(timeout_seconds: float = 8.0) -> CodexAuthLaunch:
+    """Start ``codex login`` and return the browser authorization URL.
+
+    The Codex CLI owns the OAuth local callback server. This function only starts
+    the process, captures the URL it prints, and keeps the process alive while
+    the user completes the browser authorization flow.
+    """
+    codex_bin = shutil.which("codex")
+    if codex_bin is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="codex CLI 未安装, 无法启动 Codex auth 授权",
+        )
+
+    _prune_codex_auth_processes()
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        [codex_bin, "login"],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+    )
+    os.close(slave_fd)
+
+    output: list[str] = []
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        remaining = max(0.0, min(0.25, deadline - time.monotonic()))
+        chunk = _read_pty_with_timeout(master_fd, remaining)
+        if chunk is None:
+            if proc.poll() is not None:
+                break
+            continue
+        output.append(chunk)
+        match = _CODEX_AUTH_URL_RE.search("".join(output))
+        if match is not None:
+            _RUNNING_CODEX_AUTH[proc.pid] = (proc, master_fd)
+            return {"authorization_url": match.group(0), "process_id": proc.pid}
+
+    if proc.poll() is None:
+        proc.terminate()
+    with contextlib.suppress(OSError):
+        os.close(master_fd)
+    detail = "".join(output).strip() or "codex login 未在超时时间内返回授权链接"
+    raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail)
 
 
 # ---------------------------------------------------------------------------

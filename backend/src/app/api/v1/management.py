@@ -31,6 +31,7 @@ from app.db.session import get_session
 from app.models.bot import Bot
 from app.models.workspace_library import WorkspaceLibrary
 from app.schemas.management import (
+    ChatgptAuthStartOut,
     HealthOut,
     ModelConfigOut,
     ModelConfigUpdateIn,
@@ -50,12 +51,15 @@ from app.services.management import (
     extract_model_block,
     extract_workspace_cwd,
     is_chatgpt_auth,
+    list_model_provider_options,
     merge_disabled,
     merge_model_block,
     merge_workspace_cwd,
     probe_workspace,
     read_config_yaml,
     reset_active_gateway_sessions,
+    selected_provider_transport,
+    start_codex_auth_session,
     sync_skills_fs,
     sync_workspace_env,
     validate_workspace_path,
@@ -112,6 +116,7 @@ async def get_model_config(
     await _ensure_known_profile(bot_name, session=session, fs=fs)
     doc = await read_config_yaml(fs, bot_name)
     block = extract_model_block(doc)
+    providers = await list_model_provider_options(fs, bot_name, doc)
     return ModelConfigOut(
         bot_name=bot_name,
         provider=block["provider"],
@@ -119,6 +124,7 @@ async def get_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        providers=providers,
     )
 
 
@@ -136,16 +142,24 @@ async def put_model_config(
     fs, _, _ = _state_deps(request)
     await _ensure_known_profile(bot_name, session=session, fs=fs)
     doc = await read_config_yaml(fs, bot_name)
+    providers = await list_model_provider_options(fs, bot_name, doc, preferred_provider=body.provider)
+    base_url, api_mode = selected_provider_transport(
+        providers,
+        body.provider,
+        body.base_url,
+        body.api_mode,
+    )
     new_doc = merge_model_block(
         doc,
         provider=body.provider,
         model=body.model,
-        base_url=body.base_url,
-        api_mode=body.api_mode,
+        base_url=base_url,
+        api_mode=api_mode,
     )
     await write_config_yaml(fs, bot_name, new_doc)
 
     block = extract_model_block(new_doc)
+    providers = await list_model_provider_options(fs, bot_name, new_doc)
     return ModelConfigOut(
         bot_name=bot_name,
         provider=block["provider"],
@@ -153,6 +167,27 @@ async def put_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        providers=providers,
+    )
+
+
+@router.post(
+    "/bots/{bot_name}/model-config/chatgpt-auth/start",
+    response_model=ChatgptAuthStartOut,
+    dependencies=[Depends(require_role(Role.EDITOR))],
+)
+async def start_chatgpt_auth(
+    bot_name: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ChatgptAuthStartOut:
+    fs, _, _ = _state_deps(request)
+    await _ensure_known_profile(bot_name, session=session, fs=fs)
+    launch = await anyio.to_thread.run_sync(start_codex_auth_session)
+    return ChatgptAuthStartOut(
+        authorization_url=launch["authorization_url"],
+        process_id=launch["process_id"],
+        message="已打开 Codex auth 授权页, 请在浏览器中完成 ChatGPT 授权",
     )
 
 

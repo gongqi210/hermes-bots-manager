@@ -12,6 +12,7 @@ vi.mock('@/api/management', async () => {
     ...actual,
     getModelConfig: vi.fn(),
     putModelConfig: vi.fn(),
+    startChatgptAuth: vi.fn(),
     getHealth: vi.fn(),
   };
 });
@@ -24,9 +25,15 @@ vi.mock('antd', async () => {
   return { ...actual, message: messageMock };
 });
 
-import { getHealth, getModelConfig, putModelConfig } from '@/api/management';
+import {
+  getHealth,
+  getModelConfig,
+  putModelConfig,
+  startChatgptAuth,
+} from '@/api/management';
 const mockedGet = vi.mocked(getModelConfig);
 const mockedPut = vi.mocked(putModelConfig);
+const mockedStartChatgptAuth = vi.mocked(startChatgptAuth);
 const mockedHealth = vi.mocked(getHealth);
 
 function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>> = {}) {
@@ -37,6 +44,7 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
     base_url: null,
     api_mode: null,
     is_chatgpt_auth: false,
+    providers: [],
     ...initial,
   });
   mockedHealth.mockResolvedValue({
@@ -63,47 +71,66 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
 beforeEach(() => {
   mockedGet.mockReset();
   mockedPut.mockReset();
+  mockedStartChatgptAuth.mockReset();
   mockedHealth.mockReset();
+  vi.spyOn(window, 'open').mockImplementation(() => null);
 });
 afterEach(() => {
   messageMock.success.mockReset();
   messageMock.error.mockReset();
+  vi.restoreAllMocks();
 });
 
 describe('<ModelConfigPage>', () => {
   it('renders form fields and warns when not configured', async () => {
     renderPage({});
     expect(await screen.findByTestId('model-config-page')).toBeTruthy();
-    expect(screen.getByTestId('input-provider')).toBeTruthy();
+    expect(screen.getByTestId('select-provider')).toBeTruthy();
     expect(screen.getByTestId('input-model')).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByTestId('model-not-configured')).toBeTruthy(),
     );
   });
 
-  it('one-click ChatGPT auth shortcut posts the canonical default', async () => {
+  it('ChatGPT auth button opens the Codex browser authorization URL', async () => {
     const user = userEvent.setup();
-    mockedPut.mockResolvedValue({
-      bot_name: 'foo',
+    mockedStartChatgptAuth.mockResolvedValue({
+      authorization_url: 'https://auth.openai.com/oauth/authorize?state=abc',
+      process_id: 123,
+      message: 'ok',
+    });
+    renderPage({
       provider: 'openai-codex',
       model: 'gpt-5.5',
-      base_url: 'https://chatgpt.com/backend-api/codex',
-      api_mode: 'codex_responses',
-      is_chatgpt_auth: true,
+      providers: [
+        {
+          slug: 'openai-codex',
+          name: 'OpenAI Codex',
+          is_current: true,
+          is_user_defined: false,
+          is_configured: true,
+          models: ['gpt-5.5'],
+          total_models: 1,
+          source: 'hermes',
+          base_url: 'https://chatgpt.com/backend-api/codex',
+          api_mode: 'codex_responses',
+          auth_type: 'oauth_external',
+        },
+      ],
     });
-    renderPage({});
     await user.click(await screen.findByTestId('btn-chatgpt-auth'));
     await waitFor(() =>
-      expect(mockedPut).toHaveBeenCalledWith('foo', {
-        provider: 'openai-codex',
-        model: 'gpt-5.5',
-        base_url: 'https://chatgpt.com/backend-api/codex',
-        api_mode: 'codex_responses',
-      }),
+      expect(mockedStartChatgptAuth).toHaveBeenCalledWith('foo'),
+    );
+    expect(mockedPut).not.toHaveBeenCalled();
+    expect(window.open).toHaveBeenCalledWith(
+      'https://auth.openai.com/oauth/authorize?state=abc',
+      '_blank',
+      'noopener,noreferrer',
     );
     await waitFor(() =>
       expect(messageMock.success).toHaveBeenCalledWith(
-        '已写入 ChatGPT auth 订阅模型配置',
+        '已打开 Codex auth 授权页，请在浏览器中完成授权',
       ),
     );
   });
@@ -115,7 +142,64 @@ describe('<ModelConfigPage>', () => {
       base_url: 'https://chatgpt.com/backend-api/codex',
       api_mode: 'codex_responses',
       is_chatgpt_auth: true,
+      providers: [
+        {
+          slug: 'openai-codex',
+          name: 'OpenAI Codex',
+          is_current: true,
+          is_user_defined: false,
+          is_configured: true,
+          models: ['gpt-5.5'],
+          total_models: 1,
+          source: 'hermes',
+          base_url: 'https://chatgpt.com/backend-api/codex',
+          api_mode: 'codex_responses',
+          auth_type: 'oauth_external',
+        },
+      ],
     });
     expect(await screen.findByTestId('chatgpt-auth-tag')).toBeTruthy();
+    expect(await screen.findByTestId('provider-transport-summary')).toBeTruthy();
+  });
+
+  it('saves only provider and model while transport stays Hermes-managed', async () => {
+    const user = userEvent.setup();
+    mockedPut.mockResolvedValue({
+      bot_name: 'foo',
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+      base_url: 'https://chatgpt.com/backend-api/codex',
+      api_mode: 'codex_responses',
+      is_chatgpt_auth: true,
+      providers: [],
+    });
+    renderPage({
+      provider: 'openai-codex',
+      model: 'gpt-5.5',
+      base_url: 'https://chatgpt.com/backend-api/codex',
+      api_mode: 'codex_responses',
+      providers: [
+        {
+          slug: 'openai-codex',
+          name: 'OpenAI Codex',
+          is_current: true,
+          is_user_defined: false,
+          is_configured: true,
+          models: ['gpt-5.5', 'gpt-5.4'],
+          total_models: 2,
+          source: 'hermes',
+          base_url: 'https://chatgpt.com/backend-api/codex',
+          api_mode: 'codex_responses',
+          auth_type: 'oauth_external',
+        },
+      ],
+    });
+    await user.click(await screen.findByTestId('btn-save-model-config'));
+    await waitFor(() =>
+      expect(mockedPut).toHaveBeenCalledWith('foo', {
+        provider: 'openai-codex',
+        model: 'gpt-5.5',
+      }),
+    );
   });
 });

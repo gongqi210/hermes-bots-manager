@@ -26,6 +26,10 @@ import type { ModelConfigUpdateIn } from '@/api/types';
 import { zhCN } from '@/i18n/zh-CN';
 import { extractErrorMessage } from '@/utils/errors';
 import HealthSummary from './HealthSummary';
+import {
+  providerOptionMatchesSearch,
+  providerSearchText,
+} from './modelConfigSearch';
 
 interface FormValues {
   provider: string;
@@ -58,6 +62,7 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
   const toProviderOption = (provider: (typeof providers)[number]) => ({
     value: provider.slug,
     label: `${provider.name} (${provider.slug})`,
+    searchText: providerSearchText(provider),
   });
   const configuredProviderOptions = providers
     .filter((provider) => provider.is_configured)
@@ -185,6 +190,7 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
                 options={providerOptions}
                 placeholder={zhCN.modelConfig.providerPlaceholder}
                 optionFilterProp="label"
+                filterOption={providerOptionMatchesSearch}
                 data-testid="select-provider"
                 onChange={(slug) => {
                   const nextProvider = providers.find((provider) => provider.slug === slug);

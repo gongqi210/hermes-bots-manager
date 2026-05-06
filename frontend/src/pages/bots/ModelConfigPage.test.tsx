@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ModelConfigPage from './ModelConfigPage';
+import { providerOptionMatchesSearch } from './modelConfigSearch';
 
 vi.mock('@/api/management', async () => {
   const actual = await vi.importActual<typeof import('@/api/management')>(
@@ -82,6 +83,15 @@ afterEach(() => {
 });
 
 describe('<ModelConfigPage>', () => {
+  it('matches OpenAI Codex when searching ChatGPT Codex', () => {
+    expect(
+      providerOptionMatchesSearch('chatgpt codex', {
+        label: 'OpenAI Codex (openai-codex)',
+        value: 'openai-codex',
+      }),
+    ).toBe(true);
+  });
+
   it('renders form fields and warns when not configured', async () => {
     renderPage({});
     expect(await screen.findByTestId('model-config-page')).toBeTruthy();

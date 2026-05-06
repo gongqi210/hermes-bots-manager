@@ -61,6 +61,7 @@ export const zhCN = {
     },
     cardActions: {
       chat: '模型配置',
+      gateway: 'Gateway',
       logs: '日志',
       skills: 'Skills',
       workspace: 'Workspace',

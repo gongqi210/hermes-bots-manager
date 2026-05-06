@@ -34,6 +34,11 @@ vi.mock('./LogStreamView', () => ({
     <div data-testid="mock-log-stream">logs:{botName}</div>
   ),
 }));
+vi.mock('./GatewayControlPanel', () => ({
+  default: ({ botName }: { botName: string }) => (
+    <div data-testid="mock-gateway-control">gateway:{botName}</div>
+  ),
+}));
 vi.mock('./ModelConfigPage', () => ({
   default: ({ botName }: { botName: string }) => (
     <div data-testid="mock-model-config">chat:{botName}</div>
@@ -138,9 +143,9 @@ describe('<BotDetailPlaceholderPage>', () => {
   // ─── Test 4 (B2): Clicking BotCard quick links lands on routed tab ─────────
   // Uses MemoryRouter with initialEntries so the full routing chain
   // (list → placeholder) can be exercised. Each tab is tested individually.
-  it('clicking the 4 quick links from BotsPage lands on the routed detail tab, not list', async () => {
+  it('clicking quick links from BotsPage lands on the routed detail tab, not list', async () => {
     const user = userEvent.setup();
-    const tabs = ['chat', 'logs', 'skills', 'workspace'] as const;
+    const tabs = ['chat', 'gateway', 'logs', 'skills', 'workspace'] as const;
 
     for (const tab of tabs) {
       vi.mocked(useBots).mockReturnValue({
@@ -168,6 +173,8 @@ describe('<BotDetailPlaceholderPage>', () => {
       const expectedTestId =
         tab === 'logs'
           ? 'mock-log-stream'
+          : tab === 'gateway'
+            ? 'mock-gateway-control'
           : tab === 'chat'
             ? 'mock-model-config'
             : tab === 'workspace'

@@ -67,6 +67,9 @@ export default function BotCard({ bot }: Props) {
           <Link key="chat" to={`/bots/${enc}/chat`}>
             {zhCN.bots.cardActions.chat}
           </Link>,
+          <Link key="gateway" to={`/bots/${enc}/gateway`}>
+            {zhCN.bots.cardActions.gateway}
+          </Link>,
           <Link key="logs" to={`/bots/${enc}/logs`}>
             {zhCN.bots.cardActions.logs}
           </Link>,

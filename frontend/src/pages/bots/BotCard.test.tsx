@@ -98,10 +98,11 @@ describe('<BotCard>', () => {
     expect(dashes.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('renders 4 quick links pointing at /bots/{name}/{tab}', () => {
+  it('renders quick links pointing at /bots/{name}/{tab}', () => {
     renderCard(makeBot({ name: 'test-bot' }));
     const expected = [
       { label: zhCN.bots.cardActions.chat, href: '/bots/test-bot/chat' },
+      { label: zhCN.bots.cardActions.gateway, href: '/bots/test-bot/gateway' },
       { label: zhCN.bots.cardActions.logs, href: '/bots/test-bot/logs' },
       { label: zhCN.bots.cardActions.skills, href: '/bots/test-bot/skills' },
       { label: zhCN.bots.cardActions.workspace, href: '/bots/test-bot/workspace' },

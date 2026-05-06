@@ -40,8 +40,13 @@ frontend/*.tsbuildinfo
 
 # Local parallel execution worktrees
 .worktrees/
+.planning/
+.claude/
 .claude/worktrees/
 .claude/settings.local.json
+AGENTS.md
+CLAUDE.md
+01-doc/
 
 # IDE/OS
 .DS_Store

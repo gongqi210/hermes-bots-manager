@@ -226,7 +226,7 @@ describe('<WorkspacePage>', () => {
 
   it('keeps the current workspace path visible when switching modes', async () => {
     renderPage({
-      cwd: '/Volumes/AI-projects/10-website',
+      cwd: '/opt/hermes-demo-workspace',
       exists: true,
       is_directory: true,
       readable: true,
@@ -237,14 +237,14 @@ describe('<WorkspacePage>', () => {
 
     const input = await screen.findByTestId('input-workspace-cwd') as HTMLInputElement;
     await waitFor(() =>
-      expect(input.value).toBe('/Volumes/AI-projects/10-website'),
+      expect(input.value).toBe('/opt/hermes-demo-workspace'),
     );
 
     fireEvent.click(screen.getByText('从库中选择'));
-    expect(input.value).toBe('/Volumes/AI-projects/10-website');
+    expect(input.value).toBe('/opt/hermes-demo-workspace');
 
     fireEvent.click(screen.getByText('复用其他 Bot'));
-    expect(input.value).toBe('/Volumes/AI-projects/10-website');
+    expect(input.value).toBe('/opt/hermes-demo-workspace');
   });
 
   it('Mode B: clicking 从库中选择 tab shows library button; clicking opens modal with list', async () => {

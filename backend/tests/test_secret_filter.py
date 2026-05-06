@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.secret_filter import SecretFilter
+from app.secret_filter import SecretFilter, scrub_secrets
 
 
 def _make_record(msg: str, args: tuple[Any, ...] = ()) -> logging.LogRecord:
@@ -20,9 +20,9 @@ def _make_record(msg: str, args: tuple[Any, ...] = ()) -> logging.LogRecord:
 
 def test_scrubs_cli_fingerprint() -> None:
     f = SecretFilter()
-    rec = _make_record("Using app_id cli_0123456789abcdef in request")
+    rec = _make_record("Using app_id cli_0123456789abcdefXYZ in request")
     f.filter(rec)
-    assert "cli_0123456789abcdef" not in rec.getMessage()
+    assert "cli_0123456789abcdefXYZ" not in rec.getMessage()
     assert "cli_****" in rec.getMessage()
 
 
@@ -47,3 +47,12 @@ def test_scrubs_in_args() -> None:
     rec = _make_record("secret=%s", ("cli_0123456789abcdef",))
     f.filter(rec)
     assert "cli_0123456789abcdef" not in rec.getMessage()
+
+
+def test_scrub_secrets_can_sanitize_external_log_lines() -> None:
+    secret = "b" * 40
+    text = scrub_secrets(f"gateway app=cli_abcDEF1234567890 secret={secret}")
+    assert "cli_abcDEF1234567890" not in text
+    assert secret not in text
+    assert "cli_****" in text
+    assert "****" in text

@@ -523,8 +523,9 @@ def test_ws14_replays_recent_profile_log_before_live_hub_lines(tmp_path: Path) -
     """Profile-scoped gateway.log history is visible immediately on connect."""
     log_path = tmp_path / "profiles" / "foo" / "logs" / "gateway.log"
     log_path.parent.mkdir(parents=True)
+    app_id = "cli_abcDEF1234567890"
     log_path.write_text(
-        "2026-05-05 09:20:22 INFO existing profile log\n",
+        f"2026-05-05 09:20:22 INFO existing profile log app_id={app_id}\n",
         encoding="utf-8",
     )
 
@@ -542,3 +543,5 @@ def test_ws14_replays_recent_profile_log_before_live_hub_lines(tmp_path: Path) -
         msg = ws.receive_json()
         assert msg["type"] == "log_line"
         assert "existing profile log" in msg["text"]
+        assert app_id not in msg["text"]
+        assert "cli_****" in msg["text"]

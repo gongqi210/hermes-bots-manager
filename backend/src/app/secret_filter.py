@@ -4,10 +4,10 @@ import logging
 import re
 
 # NFR-02: scrub Feishu App Secret / cli_* fingerprints from every log record.
-# Pattern 1: `cli_` + 16+ hex (Feishu-style App ID fingerprint per PRD §13).
+# Pattern 1: `cli_` + 8+ alnum chars (Feishu-style App ID fingerprint).
 # Pattern 2: 40-char hex (App Secret length). Pattern 3: 32-char hex (token).
 _PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"cli_[0-9a-fA-F]{16,}"),
+    re.compile(r"cli_[0-9a-zA-Z]{8,}"),
     re.compile(r"\b[0-9a-fA-F]{40}\b"),
     re.compile(r"\b[0-9a-fA-F]{32}\b"),
 )
@@ -17,7 +17,8 @@ def _replace(match: re.Match[str]) -> str:
     return "cli_****" if match.group(0).startswith("cli_") else "****"
 
 
-def _scrub(text: str) -> str:
+def scrub_secrets(text: str) -> str:
+    """Return ``text`` with known credential fingerprints redacted."""
     for p in _PATTERNS:
         text = p.sub(_replace, text)
     return text
@@ -29,13 +30,13 @@ class SecretFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             if isinstance(record.msg, str):
-                record.msg = _scrub(record.msg)
+                record.msg = scrub_secrets(record.msg)
             if record.args:
                 record.args = tuple(
-                    _scrub(str(a)) if isinstance(a, str) else a for a in record.args
+                    scrub_secrets(str(a)) if isinstance(a, str) else a for a in record.args
                 )
             if record.exc_text:
-                record.exc_text = _scrub(record.exc_text)
+                record.exc_text = scrub_secrets(record.exc_text)
         except Exception:  # never break logging
             pass
         return True

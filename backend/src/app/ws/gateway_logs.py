@@ -59,6 +59,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.adapters.log_tail import LogTailer
 from app.auth.jwt_utils import decode_ws_token, encode_access_token
 from app.config import get_settings
+from app.secret_filter import scrub_secrets
 from app.services.gateway.broadcast_hub import _matches as log_line_matches
 
 router = APIRouter()
@@ -106,7 +107,7 @@ async def _send_log_line(websocket: WebSocket, line: str) -> None:
             "type": "log_line",
             "ts": datetime.now(UTC).isoformat(),
             "level": _parse_level(line),
-            "text": line,
+            "text": scrub_secrets(line),
         }
     )
 

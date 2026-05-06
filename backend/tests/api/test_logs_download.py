@@ -100,6 +100,35 @@ async def test_l2b_out_of_range_hours_rejected_by_query_validation(
     assert r.status_code == 422, r.text
 
 
+async def test_l2c_download_redacts_secret_fingerprints(
+    client: AsyncClient, tmp_path: Path, monkeypatch: Any
+) -> None:
+    log_path = tmp_path / "logs" / "gateway.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    app_id = "cli_abcDEF1234567890"
+    app_secret = "c" * 40
+    log_path.write_text(
+        f"{ts} INFO app_id={app_id} secret={app_secret}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "app.adapters.hermes_cli.HermesCliAdapter.gateway_log_path",
+        lambda self, profile=None: log_path,
+    )
+
+    token = await _bootstrap(client)
+    r = await client.get(
+        "/api/v1/bots/foo/logs/download?hours=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    assert app_id not in r.text
+    assert app_secret not in r.text
+    assert "cli_****" in r.text
+    assert "****" in r.text
+
+
 async def test_l3_missing_log_returns_empty_body(
     client: AsyncClient, tmp_path: Path, monkeypatch: Any
 ) -> None:

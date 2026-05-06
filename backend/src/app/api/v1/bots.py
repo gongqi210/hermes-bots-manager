@@ -44,6 +44,7 @@ from app.schemas.bot import (
     BotOut,
     BotRenameIn,
 )
+from app.secret_filter import scrub_secrets
 from app.services.bot import BotNotFoundError, BotService, DuplicateBotError
 
 _ALLOWED_LOG_HOURS = frozenset({1, 6, 24, 72})
@@ -185,7 +186,7 @@ async def download_logs(
                                 continue
                         except ValueError:
                             pass
-                    yield line.encode("utf-8")
+                    yield scrub_secrets(line).encode("utf-8")
         except FileNotFoundError:
             return
 

@@ -1,8 +1,17 @@
 # Hermes Bots Manager
 
+> Launch and operate Hermes Feishu/Lark AI bots from a web console, without touching the CLI.
+
 Hermes Bots Manager 是一个面向内部运营和业务 PM 的飞书 Bot 管控台。它把 Hermes Agent 的多 Profile / 多 Bot 能力包装成 Web 操作界面，让非工程同事不碰命令行也能完成 Bot 创建、飞书接入、Gateway 运维、pairing 审批、Workspace 和 Skills 配置。
 
 核心目标：在表单里粘贴飞书 App ID / Secret，3 分钟内让飞书群里的机器人可以被 @ 并回复。
+
+## 宣传语
+
+- 表单里粘 App ID / Secret，飞书群里的 AI Bot 3 分钟上线。
+- 多 Bot、多 Profile、多 Skill，一站式管好 Hermes 机器人矩阵。
+- 给运营和 PM 用的 Hermes 飞书 Bot 控制台。
+- 从配置、配对到日志排障，把飞书 Bot 运维搬进浏览器。
 
 ## 当前能力
 

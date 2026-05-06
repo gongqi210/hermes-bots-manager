@@ -18,6 +18,7 @@ function renderSummary(overrides: Partial<HealthOut> = {}) {
     gateway_state: 'running',
     gateway_why: 'ok',
     model_configured: true,
+    provider_authorized: true,
     workspace_status: 'ok',
     skills_enabled: 1,
     skills_total: 1,
@@ -73,5 +74,11 @@ describe('<HealthSummary>', () => {
     await screen.findByTestId('health-gateway-state');
     expect(screen.queryByTestId('health-dangerous-badge')).toBeNull();
     expect(screen.queryByTestId('health-shadowed-badge')).toBeNull();
+  });
+
+  it('H6: provider_authorized=false shows 未授权 tag', async () => {
+    renderSummary({ provider_authorized: false });
+    const tag = await screen.findByTestId('health-provider-auth');
+    expect(tag.textContent).toContain('未授权');
   });
 });

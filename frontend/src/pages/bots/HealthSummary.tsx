@@ -77,6 +77,16 @@ export default function HealthSummary({ botName }: { botName: string }) {
                 : zhCN.health.modelMissing}
             </Tag>
           </Descriptions.Item>
+          <Descriptions.Item label={zhCN.health.providerAuthLabel}>
+            <Tag
+              color={data.provider_authorized ? 'green' : 'red'}
+              data-testid="health-provider-auth"
+            >
+              {data.provider_authorized
+                ? zhCN.health.providerAuthorized
+                : zhCN.health.providerMissingAuth}
+            </Tag>
+          </Descriptions.Item>
           <Descriptions.Item label={zhCN.health.workspaceLabel}>
             <Tag color={WORKSPACE_COLOR[data.workspace_status]}>
               {data.workspace_status}

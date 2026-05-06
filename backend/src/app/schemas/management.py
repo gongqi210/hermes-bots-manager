@@ -45,6 +45,7 @@ class ModelConfigOut(BaseModel):
     base_url: str | None = None
     api_mode: str | None = None
     is_chatgpt_auth: bool = False
+    provider_authorized: bool = False
     providers: list[ModelProviderOption] = Field(default_factory=list)
 
 
@@ -112,6 +113,7 @@ class HealthOut(BaseModel):
     gateway_state: GatewayState
     gateway_why: str
     model_configured: bool
+    provider_authorized: bool
     workspace_status: Literal["ok", "warning", "error", "unset"]
     skills_enabled: int
     skills_total: int

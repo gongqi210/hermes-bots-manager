@@ -49,6 +49,7 @@ from app.models.bot import Bot
 from app.schemas.bot import BotCloneIn, BotCreateIn, BotFeishuCredentialsIn, BotOut, BotRenameIn
 from app.schemas.gateway import GatewayState, GatewayStatusOut
 from app.services.feishu_env import apply_feishu_runtime_env
+from app.services.provider_auth import reuse_provider_auth
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +371,11 @@ class BotService:
             )
             await self.fs.write_env(payload.name, env_dict)
 
+        try:
+            await reuse_provider_auth(self.fs, payload.name)
+        except Exception:
+            logger.warning("provider auth reuse failed for %s", payload.name, exc_info=True)
+
         return self._to_botout(payload.name, bot, status=BotStatus.GREY, why="未配置 Gateway")
 
     async def clone_bot(self, source_name: str, payload: BotCloneIn) -> BotOut:
@@ -392,6 +398,10 @@ class BotService:
         except IntegrityError as e:
             await self.session.rollback()
             raise DuplicateBotError(payload.new_name) from e
+        try:
+            await reuse_provider_auth(self.fs, payload.new_name)
+        except Exception:
+            logger.warning("provider auth reuse failed for %s", payload.new_name, exc_info=True)
         return self._to_botout(
             payload.new_name, bot, status=BotStatus.GREY, why="克隆完成 — 未配置 Gateway"
         )

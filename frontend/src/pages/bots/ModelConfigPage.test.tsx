@@ -45,6 +45,7 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
     base_url: null,
     api_mode: null,
     is_chatgpt_auth: false,
+    provider_authorized: false,
     providers: [],
     ...initial,
   });
@@ -53,6 +54,7 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
     gateway_state: 'stopped',
     gateway_why: '未运行',
     model_configured: !!initial.provider,
+    provider_authorized: true,
     workspace_status: 'unset',
     skills_enabled: 0,
     skills_total: 0,
@@ -181,6 +183,7 @@ describe('<ModelConfigPage>', () => {
       base_url: 'https://chatgpt.com/backend-api/codex',
       api_mode: 'codex_responses',
       is_chatgpt_auth: true,
+      provider_authorized: true,
       providers: [],
     });
     renderPage({

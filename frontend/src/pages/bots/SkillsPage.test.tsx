@@ -93,6 +93,7 @@ function renderPage() {
     gateway_state: 'stopped',
     gateway_why: '未运行',
     model_configured: false,
+    provider_authorized: false,
     workspace_status: 'unset',
     skills_enabled: 3,
     skills_total: 4,

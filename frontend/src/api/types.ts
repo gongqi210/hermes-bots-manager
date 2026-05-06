@@ -205,6 +205,7 @@ export interface ModelConfigOut {
   base_url: string | null;
   api_mode: string | null;
   is_chatgpt_auth: boolean;
+  provider_authorized: boolean;
   providers: ModelProviderOption[];
 }
 
@@ -266,6 +267,7 @@ export interface HealthOut {
   gateway_state: GatewayState;
   gateway_why: string;
   model_configured: boolean;
+  provider_authorized: boolean;
   workspace_status: WorkspaceStatus;
   skills_enabled: number;
   skills_total: number;

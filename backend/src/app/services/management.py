@@ -32,12 +32,14 @@ from fastapi import HTTPException, status
 from app.adapters.hostops import HostOps
 from app.adapters.profile_fs import ProfileFsAdapter
 from app.schemas.management import ModelProviderOption, SkillItem
+from app.services.provider_auth import (
+    CHATGPT_AUTH_API_MODE,
+    CHATGPT_AUTH_BASE_URL,
+    CHATGPT_AUTH_PROVIDER,
+)
 
 logger = logging.getLogger(__name__)
 
-CHATGPT_AUTH_PROVIDER = "openai-codex"
-CHATGPT_AUTH_API_MODE = "codex_responses"
-CHATGPT_AUTH_BASE_URL = "https://chatgpt.com/backend-api/codex"
 TERMINAL_CWD_ENV_KEY = "TERMINAL_CWD"
 _CODEX_AUTH_URL_RE = re.compile(r"https://auth\.openai\.com/oauth/authorize\?\S+")
 _RUNNING_CODEX_AUTH: dict[int, tuple[subprocess.Popen[bytes], int]] = {}

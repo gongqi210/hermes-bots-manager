@@ -65,6 +65,10 @@ from app.services.management import (
     validate_workspace_path,
     write_config_yaml,
 )
+from app.services.provider_auth import (
+    provider_authorized,
+    reuse_provider_auth,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +128,7 @@ async def get_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        provider_authorized=await provider_authorized(fs, bot_name, block["provider"]),
         providers=providers,
     )
 
@@ -159,6 +164,8 @@ async def put_model_config(
     await write_config_yaml(fs, bot_name, new_doc)
 
     block = extract_model_block(new_doc)
+    if is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]):
+        await reuse_provider_auth(fs, bot_name)
     providers = await list_model_provider_options(fs, bot_name, new_doc)
     return ModelConfigOut(
         bot_name=bot_name,
@@ -167,6 +174,7 @@ async def put_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        provider_authorized=await provider_authorized(fs, bot_name, block["provider"]),
         providers=providers,
     )
 
@@ -495,6 +503,9 @@ async def get_health(
     doc = await read_config_yaml(fs, bot_name)
     model_block = extract_model_block(doc)
     model_configured = bool(model_block["provider"] and model_block["model"])
+    provider_auth_status = (
+        await provider_authorized(fs, bot_name, model_block["provider"]) if model_configured else False
+    )
 
     cwd = extract_workspace_cwd(doc)
     ws = probe_workspace(cwd)
@@ -542,6 +553,7 @@ async def get_health(
     elif (
         gw.state in ("stopped", "unconfigured", "starting")
         or not model_configured
+        or (model_configured and not provider_auth_status)
         or workspace_status == "warning"
     ):
         overall = "warning"
@@ -551,6 +563,7 @@ async def get_health(
         gateway_state=gw.state,
         gateway_why=gw.why,
         model_configured=model_configured,
+        provider_authorized=provider_auth_status,
         workspace_status=workspace_status,
         skills_enabled=skills_enabled,
         skills_total=skills_total,

@@ -295,6 +295,10 @@ async def test_create_bot_validates_name_then_calls_hermes_then_writes_db_and_en
     body = host.fs[env_path]
     assert "FEISHU_APP_ID=cli_x" in body
     assert "FEISHU_APP_SECRET=secret" in body
+    assert "FEISHU_CONNECTION_MODE=websocket" in body
+    assert "FEISHU_GROUP_POLICY=open" in body
+    assert "FEISHU_REQUIRE_MENTION=true" in body
+    assert "FEISHU_GROUP_STRATEGY" not in body
 
     # BotOut returned with correct shape.
     assert out.name == "alpha"

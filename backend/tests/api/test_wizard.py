@@ -372,8 +372,11 @@ async def test_update_feishu_credentials_persists_secret_and_rewrites_env(
     assert "FEISHU_APP_ID=cli_brand_new" in env
     assert "FEISHU_APP_SECRET=supersecret-9876" in env
     assert "FEISHU_CONNECTION_MODE=websocket" in env
-    # Default domain (feishu) and default group_strategy (mention) → 不写入环境变量。
+    # Default domain (feishu) → 不写 FEISHU_DOMAIN。
     assert "FEISHU_DOMAIN" not in env
+    # group_strategy=mention → GROUP_POLICY=open + REQUIRE_MENTION=true。
+    assert "FEISHU_GROUP_POLICY=open" in env
+    assert "FEISHU_REQUIRE_MENTION=true" in env
     assert "FEISHU_GROUP_STRATEGY" not in env
 
 
@@ -399,7 +402,10 @@ async def test_update_feishu_credentials_writes_lark_and_group_when_non_default(
     assert r.status_code == 200, r.text
     env = fake_host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
     assert "FEISHU_DOMAIN=lark" in env
-    assert "FEISHU_GROUP_STRATEGY=all" in env
+    # group_strategy=all → GROUP_POLICY=open + REQUIRE_MENTION=false。
+    assert "FEISHU_GROUP_POLICY=open" in env
+    assert "FEISHU_REQUIRE_MENTION=false" in env
+    assert "FEISHU_GROUP_STRATEGY" not in env
 
 
 async def test_update_feishu_credentials_409_when_app_id_belongs_to_other_bot(
@@ -541,3 +547,135 @@ async def test_lark_app_init_returns_404_when_bot_missing(client: AsyncClient) -
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH /bots/{name}/feishu-policy — group strategy live edit
+# ---------------------------------------------------------------------------
+
+
+async def _seed_bot_with_env(
+    fake_host: InMemoryHostOps,
+    session: AsyncSession,
+    name: str,
+    *,
+    secret_plain: str = "fake-secret-xyz",
+    app_id: str = "cli_alpha",
+    initial_group_strategy: str = "mention",
+) -> None:
+    session.add(
+        Bot(
+            name=name,
+            feishu_app_id=app_id,
+            feishu_app_secret_enc=encrypt_str(secret_plain),
+            tags=[],
+            domain="feishu",
+            connection_mode="websocket",
+            group_strategy=initial_group_strategy,
+        )
+    )
+    await session.commit()
+    fake_host.fs[HERMES_HOME / "profiles" / name / ".env"] = (
+        f"FEISHU_APP_ID={app_id}\n"
+        f"FEISHU_APP_SECRET={secret_plain}\n"
+        "FEISHU_CONNECTION_MODE=websocket\n"
+        "FEISHU_GROUP_POLICY=open\n"
+        "FEISHU_REQUIRE_MENTION=true\n"
+        "FEISHU_GROUP_STRATEGY=mention\n"
+        "TERMINAL_CWD=/tmp/x\n"
+        "UNRELATED_KEY=keep-me\n"
+    )
+
+
+async def test_update_feishu_policy_mention_writes_open_and_require_mention(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot_with_env(fake_host, session, "alpha", initial_group_strategy="all")
+    token = await _bootstrap_owner(client)
+    r = await client.patch(
+        "/api/v1/bots/alpha/feishu-policy",
+        json={"group_strategy": "mention"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["group_strategy"] == "mention"
+    env = fake_host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
+    assert "FEISHU_GROUP_POLICY=open" in env
+    assert "FEISHU_REQUIRE_MENTION=true" in env
+    assert "FEISHU_GROUP_STRATEGY" not in env
+
+
+async def test_update_feishu_policy_all_writes_open_and_no_mention(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot_with_env(fake_host, session, "alpha")
+    token = await _bootstrap_owner(client)
+    r = await client.patch(
+        "/api/v1/bots/alpha/feishu-policy",
+        json={"group_strategy": "all"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    env = fake_host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
+    assert "FEISHU_GROUP_POLICY=open" in env
+    assert "FEISHU_REQUIRE_MENTION=false" in env
+    assert "FEISHU_GROUP_STRATEGY" not in env
+
+
+async def test_update_feishu_policy_block_writes_disabled(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot_with_env(fake_host, session, "alpha")
+    token = await _bootstrap_owner(client)
+    r = await client.patch(
+        "/api/v1/bots/alpha/feishu-policy",
+        json={"group_strategy": "block"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    env = fake_host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
+    assert "FEISHU_GROUP_POLICY=disabled" in env
+    assert "FEISHU_REQUIRE_MENTION=true" in env
+    assert "FEISHU_GROUP_STRATEGY" not in env
+
+
+async def test_update_feishu_policy_preserves_app_secret_and_unrelated_keys(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot_with_env(fake_host, session, "alpha", secret_plain="fake-secret-xyz")
+    token = await _bootstrap_owner(client)
+    r = await client.patch(
+        "/api/v1/bots/alpha/feishu-policy",
+        json={"group_strategy": "all"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    env = fake_host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
+    assert "FEISHU_APP_SECRET=fake-secret-xyz" in env
+    assert "FEISHU_APP_ID=cli_alpha" in env
+    assert "TERMINAL_CWD=/tmp/x" in env
+    assert "UNRELATED_KEY=keep-me" in env
+
+
+async def test_update_feishu_policy_404_when_bot_missing(client: AsyncClient) -> None:
+    token = await _bootstrap_owner(client)
+    r = await client.patch(
+        "/api/v1/bots/ghost/feishu-policy",
+        json={"group_strategy": "mention"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 404
+
+
+async def test_update_feishu_policy_requires_editor_role(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot_with_env(fake_host, session, "alpha")
+    owner_token = await _bootstrap_owner(client)
+    viewer_token = await _create_user(client, owner_token, "viewer1", "Viewer")
+    r = await client.patch(
+        "/api/v1/bots/alpha/feishu-policy",
+        json={"group_strategy": "all"},
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert r.status_code == 403

@@ -56,6 +56,9 @@ export interface BotOut {
   why: string;
   last_active_at: string | null;
   created_at: string;
+  domain?: 'feishu' | 'lark';
+  connection_mode?: 'websocket';
+  group_strategy?: 'mention' | 'block' | 'all';
 }
 
 export interface BotCreateIn {
@@ -101,6 +104,10 @@ export interface AppIdCheckResult {
 
 export interface BotSecretResetIn {
   feishu_app_secret: string; // plaintext; backend schema uses SecretStr
+}
+
+export interface BotFeishuPolicyPayload {
+  group_strategy: 'mention' | 'block' | 'all';
 }
 
 export interface BotFeishuCredentialsIn {

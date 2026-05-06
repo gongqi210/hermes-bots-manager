@@ -31,6 +31,18 @@ vi.mock('@/hooks/useRole', () => ({
   useRole: vi.fn(() => 'Editor' as Role),
 }));
 
+vi.mock('@/hooks/useBots', () => ({
+  useBots: vi.fn(() => ({
+    data: [{ name: 'foo', group_strategy: 'mention' }],
+    isLoading: false,
+    error: null,
+  })),
+}));
+
+vi.mock('@/api/wizard', () => ({
+  updateBotFeishuPolicy: vi.fn(),
+}));
+
 vi.mock('./PairingListInBot', () => ({
   default: ({ botName }: { botName: string }) => (
     <div data-testid="pairing-list-in-bot">{botName}</div>
@@ -109,6 +121,11 @@ afterEach(() => {
 });
 
 describe('<GatewayControlPanel>', () => {
+  it('renders the Feishu group policy panel in access strategy area', async () => {
+    renderPanel();
+    expect(await screen.findByTestId('feishu-group-policy-panel')).toBeTruthy();
+  });
+
   it('G1: Viewer cannot control — buttons disabled', async () => {
     mockedUseRole.mockReturnValue('Viewer');
     renderPanel();

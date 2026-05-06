@@ -41,6 +41,7 @@ from app.adapters.parsers import parse_gateway_pid_file
 from app.adapters.profile_fs import ProfileFsAdapter
 from app.auth.crypto import encrypt_str
 from app.models.bot import Bot
+from app.services.feishu_env import apply_feishu_runtime_env
 
 _STEP_LABELS = [
     "校验飞书凭证",
@@ -286,12 +287,9 @@ class WizardService:
                 "FEISHU_APP_ID": feishu_app_id,
                 "FEISHU_APP_SECRET": feishu_app_secret.get_secret_value(),
             }
-            if domain == "lark":
-                env_data["FEISHU_DOMAIN"] = "lark"
-            if connection_mode == "websocket":
-                env_data["FEISHU_CONNECTION_MODE"] = "websocket"
-            if group_strategy != "mention":
-                env_data["FEISHU_GROUP_STRATEGY"] = group_strategy
+            apply_feishu_runtime_env(
+                env_data, domain=domain, group_strategy=group_strategy
+            )
             await self.fs.write_env(name, env_data)
 
             # Update DB row with Fernet ciphertext + wizard config snapshot.

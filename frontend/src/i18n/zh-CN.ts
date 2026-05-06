@@ -60,7 +60,7 @@ export const zhCN = {
       grey: '未运行',
     },
     cardActions: {
-      chat: '对话测试',
+      chat: '模型配置',
       logs: '日志',
       skills: 'Skills',
       workspace: 'Workspace',
@@ -284,6 +284,15 @@ export const zhCN = {
     presetOpen: '开放测试',
     presetOwnerAdmin: '仅 Owner/Admin',
     presetCustom: '自定义',
+  },
+  feishuGroupPolicy: {
+    title: '群聊响应策略',
+    optionMention: '仅 @ 时响应',
+    optionAll: '响应所有群消息',
+    optionBlock: '不响应群聊',
+    restartHint: '保存后需要重启 Gateway 才会影响正在运行的机器人。',
+    saveBtn: '保存策略',
+    saveSuccess: '策略已保存，重启 Gateway 生效',
   },
   allowlistPreset: {
     title: '访问策略',

@@ -104,6 +104,12 @@ async def test_wizard_run_yields_seven_step_frames_plus_done(session: AsyncSessi
     steps_seen = {e["step"] for e in events if e["step"] > 0}
     assert steps_seen == {1, 2, 3, 4, 5, 6, 7}
 
+    env_body = host.fs[HERMES_HOME / "profiles" / "alpha" / ".env"]
+    assert "FEISHU_CONNECTION_MODE=websocket" in env_body
+    assert "FEISHU_GROUP_POLICY=open" in env_body
+    assert "FEISHU_REQUIRE_MENTION=true" in env_body
+    assert "FEISHU_GROUP_STRATEGY" not in env_body
+
 
 # ---------------------------------------------------------------------------
 # Test 2: failure at step 2 stops execution, no later steps run

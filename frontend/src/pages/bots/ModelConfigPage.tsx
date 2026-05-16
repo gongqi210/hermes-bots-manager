@@ -104,7 +104,10 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
     mutationFn: () => startChatgptAuth(botName),
     onSuccess: (result) => {
       window.open(result.authorization_url, '_blank', 'noopener,noreferrer');
-      message.success(zhCN.modelConfig.chatgptAuthStarted);
+      if (result.user_code) {
+        message.info(`授权验证码：${result.user_code}`);
+      }
+      message.success(result.message || zhCN.modelConfig.chatgptAuthStarted);
     },
     onError: (e: unknown) => message.error(extractErrorMessage(e)),
   });

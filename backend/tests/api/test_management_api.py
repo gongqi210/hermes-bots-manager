@@ -211,7 +211,7 @@ async def test_model_config_viewer_cannot_put(
     assert r.status_code == 403
 
 
-async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
+async def test_chatgpt_auth_start_launches_hermes_codex_without_writing_model_config(
     client: AsyncClient,
     fake_host: InMemoryHostOps,
     session: AsyncSession,
@@ -223,16 +223,18 @@ async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
     fake_host.fs[_profile_config_path("foo")] = "feishu:\n  domain: feishu\n"
     token = await _bootstrap_owner(client)
 
-    def fake_start_codex_auth_session() -> dict[str, int | str]:
+    def fake_start_hermes_codex_auth_session(*args: Any) -> dict[str, int | str | None]:
         return {
-            "authorization_url": "https://auth.openai.com/oauth/authorize?state=test",
+            "authorization_url": "https://auth.openai.com/codex/device",
+            "verification_url": "https://auth.openai.com/codex/device",
+            "user_code": "ABCD-EFGH",
             "process_id": 123,
         }
 
     monkeypatch.setattr(
         management_api,
-        "start_codex_auth_session",
-        fake_start_codex_auth_session,
+        "start_hermes_codex_auth_session",
+        fake_start_hermes_codex_auth_session,
     )
     r = await client.post(
         "/api/v1/bots/foo/model-config/chatgpt-auth/start",
@@ -240,9 +242,11 @@ async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["authorization_url"] == "https://auth.openai.com/oauth/authorize?state=test"
+    assert body["authorization_url"] == "https://auth.openai.com/codex/device"
+    assert body["verification_url"] == "https://auth.openai.com/codex/device"
+    assert body["user_code"] == "ABCD-EFGH"
     assert body["process_id"] == 123
-    assert "Codex auth" in body["message"]
+    assert "Hermes Codex" in body["message"]
     assert yaml.safe_load(fake_host.fs[_profile_config_path("foo")]) == {
         "feishu": {"domain": "feishu"}
     }

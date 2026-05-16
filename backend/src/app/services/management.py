@@ -42,7 +42,21 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_CWD_ENV_KEY = "TERMINAL_CWD"
 _CODEX_AUTH_URL_RE = re.compile(r"https://auth\.openai\.com/oauth/authorize\?\S+")
+_HERMES_CODEX_DEVICE_URL_RE = re.compile(r"https://auth\.openai\.com/codex/device")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _RUNNING_CODEX_AUTH: dict[int, tuple[subprocess.Popen[bytes], int]] = {}
+_RUNNING_HERMES_CODEX_AUTH: dict[int, tuple[subprocess.Popen[bytes], int]] = {}
+_HERMES_CODEX_AUTH_SCRIPT = r"""
+from types import SimpleNamespace
+
+from hermes_cli.auth import PROVIDER_REGISTRY, _login_openai_codex
+
+_login_openai_codex(
+    SimpleNamespace(),
+    PROVIDER_REGISTRY["openai-codex"],
+    force_new_login=True,
+)
+"""
 _HERMES_PROVIDER_CATALOG_SCRIPT = r"""
 import json
 import sys
@@ -653,12 +667,19 @@ def selected_provider_transport(
 class CodexAuthLaunch(TypedDict):
     authorization_url: str
     process_id: int
+    user_code: str | None
+    verification_url: str | None
 
 
 def _prune_codex_auth_processes() -> None:
     for pid, (proc, master_fd) in list(_RUNNING_CODEX_AUTH.items()):
         if proc.poll() is not None:
             _RUNNING_CODEX_AUTH.pop(pid, None)
+            with contextlib.suppress(OSError):
+                os.close(master_fd)
+    for pid, (proc, master_fd) in list(_RUNNING_HERMES_CODEX_AUTH.items()):
+        if proc.poll() is not None:
+            _RUNNING_HERMES_CODEX_AUTH.pop(pid, None)
             with contextlib.suppress(OSError):
                 os.close(master_fd)
 
@@ -674,6 +695,91 @@ def _read_pty_with_timeout(master_fd: int, timeout_seconds: float) -> str | None
     if not chunk:
         return None
     return chunk.decode(errors="replace")
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI_RE.sub("", value)
+
+
+def _extract_hermes_codex_device_code(output: str) -> str | None:
+    text = _strip_ansi(output)
+    match = re.search(r"Enter this code:\s+([A-Z0-9][A-Z0-9-]{4,})", text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def start_hermes_codex_auth_session(
+    fs: ProfileFsAdapter,
+    profile_name: str,
+    timeout_seconds: float = 8.0,
+) -> CodexAuthLaunch:
+    """Start Hermes-owned OpenAI Codex auth for one profile.
+
+    Hermes must own a distinct OAuth session. Starting ``codex login`` would
+    update ``~/.codex/auth.json`` instead, making Hermes reuse a refresh token
+    that Codex CLI or VS Code can consume first.
+    """
+    agent_root = _hermes_agent_root(fs)
+    if agent_root is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未找到 Hermes Agent 安装目录, 无法启动 Hermes Codex 授权",
+        )
+    python_bin = _hermes_agent_python(agent_root)
+    if python_bin is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未找到 Hermes Agent Python 环境, 无法启动 Hermes Codex 授权",
+        )
+
+    _prune_codex_auth_processes()
+    proc_env = os.environ.copy()
+    proc_env["HERMES_HOME"] = str(fs.profile_dir(profile_name))
+    existing_pythonpath = proc_env.get("PYTHONPATH", "")
+    proc_env["PYTHONPATH"] = (
+        str(agent_root) if not existing_pythonpath else f"{agent_root}:{existing_pythonpath}"
+    )
+
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        [str(python_bin), "-c", _HERMES_CODEX_AUTH_SCRIPT],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+        cwd=agent_root,
+        env=proc_env,
+    )
+    os.close(slave_fd)
+
+    output: list[str] = []
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        remaining = max(0.0, min(0.25, deadline - time.monotonic()))
+        chunk = _read_pty_with_timeout(master_fd, remaining)
+        if chunk is None:
+            if proc.poll() is not None:
+                break
+            continue
+        output.append(chunk)
+        combined = "".join(output)
+        url_match = _HERMES_CODEX_DEVICE_URL_RE.search(_strip_ansi(combined))
+        user_code = _extract_hermes_codex_device_code(combined)
+        if url_match is not None and user_code:
+            verification_url = url_match.group(0)
+            _RUNNING_HERMES_CODEX_AUTH[proc.pid] = (proc, master_fd)
+            return {
+                "authorization_url": verification_url,
+                "verification_url": verification_url,
+                "user_code": user_code,
+                "process_id": proc.pid,
+            }
+
+    if proc.poll() is None:
+        proc.terminate()
+    with contextlib.suppress(OSError):
+        os.close(master_fd)
+    detail = _strip_ansi("".join(output)).strip() or "Hermes Codex 授权未在超时时间内返回验证码"
+    raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail)
 
 
 def start_codex_auth_session(timeout_seconds: float = 8.0) -> CodexAuthLaunch:
@@ -714,7 +820,12 @@ def start_codex_auth_session(timeout_seconds: float = 8.0) -> CodexAuthLaunch:
         match = _CODEX_AUTH_URL_RE.search("".join(output))
         if match is not None:
             _RUNNING_CODEX_AUTH[proc.pid] = (proc, master_fd)
-            return {"authorization_url": match.group(0), "process_id": proc.pid}
+            return {
+                "authorization_url": match.group(0),
+                "verification_url": None,
+                "user_code": None,
+                "process_id": proc.pid,
+            }
 
     if proc.poll() is None:
         proc.terminate()

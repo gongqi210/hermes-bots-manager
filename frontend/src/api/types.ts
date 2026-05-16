@@ -220,6 +220,8 @@ export interface ChatgptAuthStartOut {
   authorization_url: string;
   process_id: number;
   message: string;
+  user_code: string | null;
+  verification_url: string | null;
 }
 
 export type WorkspaceStatus = 'ok' | 'warning' | 'error' | 'unset';

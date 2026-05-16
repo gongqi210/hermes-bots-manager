@@ -60,6 +60,8 @@ class ChatgptAuthStartOut(BaseModel):
     authorization_url: str
     process_id: int
     message: str
+    user_code: str | None = None
+    verification_url: str | None = None
 
 
 class WorkspaceOut(BaseModel):

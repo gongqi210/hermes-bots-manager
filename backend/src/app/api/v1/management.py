@@ -59,7 +59,7 @@ from app.services.management import (
     read_config_yaml,
     reset_active_gateway_sessions,
     selected_provider_transport,
-    start_codex_auth_session,
+    start_hermes_codex_auth_session,
     sync_skills_fs,
     sync_workspace_env,
     validate_workspace_path,
@@ -191,11 +191,13 @@ async def start_chatgpt_auth(
 ) -> ChatgptAuthStartOut:
     fs, _, _ = _state_deps(request)
     await _ensure_known_profile(bot_name, session=session, fs=fs)
-    launch = await anyio.to_thread.run_sync(start_codex_auth_session)
+    launch = await anyio.to_thread.run_sync(start_hermes_codex_auth_session, fs, bot_name)
     return ChatgptAuthStartOut(
         authorization_url=launch["authorization_url"],
         process_id=launch["process_id"],
-        message="已打开 Codex auth 授权页, 请在浏览器中完成 ChatGPT 授权",
+        user_code=launch["user_code"],
+        verification_url=launch["verification_url"],
+        message="已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权",
     )
 
 

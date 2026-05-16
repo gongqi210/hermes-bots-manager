@@ -81,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   messageMock.success.mockReset();
   messageMock.error.mockReset();
+  messageMock.info.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -104,12 +105,14 @@ describe('<ModelConfigPage>', () => {
     );
   });
 
-  it('ChatGPT auth button opens the Codex browser authorization URL', async () => {
+  it('ChatGPT auth button opens the Hermes Codex device page and shows the code', async () => {
     const user = userEvent.setup();
     mockedStartChatgptAuth.mockResolvedValue({
-      authorization_url: 'https://auth.openai.com/oauth/authorize?state=abc',
+      authorization_url: 'https://auth.openai.com/codex/device',
+      verification_url: 'https://auth.openai.com/codex/device',
+      user_code: 'ABCD-EFGH',
       process_id: 123,
-      message: 'ok',
+      message: '已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权',
     });
     renderPage({
       provider: 'openai-codex',
@@ -136,13 +139,16 @@ describe('<ModelConfigPage>', () => {
     );
     expect(mockedPut).not.toHaveBeenCalled();
     expect(window.open).toHaveBeenCalledWith(
-      'https://auth.openai.com/oauth/authorize?state=abc',
+      'https://auth.openai.com/codex/device',
       '_blank',
       'noopener,noreferrer',
     );
     await waitFor(() =>
+      expect(messageMock.info).toHaveBeenCalledWith('授权验证码：ABCD-EFGH'),
+    );
+    await waitFor(() =>
       expect(messageMock.success).toHaveBeenCalledWith(
-        '已打开 Codex auth 授权页，请在浏览器中完成授权',
+        '已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权',
       ),
     );
   });

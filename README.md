@@ -47,6 +47,14 @@ MVP 默认单机部署，后端只使用一个 uvicorn worker。SQLite 和内存
 ## 本地启动
 
 ```bash
+./start.sh
+```
+
+启动脚本会在首次运行时复制 `backend/.env.example`，按需安装依赖，执行数据库迁移，并同时启动前后端服务。
+
+也可以手动执行：
+
+```bash
 make install
 cp backend/.env.example backend/.env
 cd backend && uv run alembic upgrade head
@@ -65,6 +73,7 @@ make dev
 ## 常用命令
 
 ```bash
+./start.sh        # 本地一键启动
 make lint      # backend ruff/mypy + frontend eslint
 make test      # backend pytest + frontend vitest
 make smoke     # 真实 Hermes CLI smoke，用于本机集成验证

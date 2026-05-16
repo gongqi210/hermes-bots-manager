@@ -20,8 +20,10 @@ import {
 } from '@tanstack/react-query';
 import { useState } from 'react';
 import { gatewayAction, getAllowlist, getGatewayStatus } from '@/api/gateway';
+import { useBots } from '@/hooks/useBots';
 import PairingListInBot from './PairingListInBot';
 import AllowlistPresetPanel from './AllowlistPresetPanel';
+import FeishuGroupPolicyPanel from './FeishuGroupPolicyPanel';
 import { GatewayStatusPill } from './GatewayStatusPill';
 import { useRole } from '@/hooks/useRole';
 import { zhCN } from '@/i18n/zh-CN';
@@ -48,6 +50,9 @@ export default function GatewayControlPanel({ botName }: { botName: string }) {
     queryKey: ['allowlist', botName],
     queryFn: () => getAllowlist(botName),
   });
+  const botsQ = useBots({ q: botName });
+  const currentBot = botsQ.data?.find((bot) => bot.name === botName);
+  const currentGroupStrategy = currentBot?.group_strategy ?? 'mention';
 
   const actionM = useMutation({
     mutationFn: (action: GatewayActionType) => gatewayAction(botName, action),
@@ -132,6 +137,11 @@ export default function GatewayControlPanel({ botName }: { botName: string }) {
       </Space>
 
       <PairingListInBot botName={botName} />
+
+      <FeishuGroupPolicyPanel
+        botName={botName}
+        currentStrategy={currentGroupStrategy}
+      />
 
       <AllowlistPresetPanel
         botName={botName}

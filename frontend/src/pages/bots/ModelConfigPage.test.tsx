@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ModelConfigPage from './ModelConfigPage';
+import { providerOptionMatchesSearch } from './modelConfigSearch';
 
 vi.mock('@/api/management', async () => {
   const actual = await vi.importActual<typeof import('@/api/management')>(
@@ -44,6 +45,7 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
     base_url: null,
     api_mode: null,
     is_chatgpt_auth: false,
+    provider_authorized: false,
     providers: [],
     ...initial,
   });
@@ -52,6 +54,7 @@ function renderPage(initial: Partial<Awaited<ReturnType<typeof getModelConfig>>>
     gateway_state: 'stopped',
     gateway_why: '未运行',
     model_configured: !!initial.provider,
+    provider_authorized: true,
     workspace_status: 'unset',
     skills_enabled: 0,
     skills_total: 0,
@@ -78,10 +81,20 @@ beforeEach(() => {
 afterEach(() => {
   messageMock.success.mockReset();
   messageMock.error.mockReset();
+  messageMock.info.mockReset();
   vi.restoreAllMocks();
 });
 
 describe('<ModelConfigPage>', () => {
+  it('matches OpenAI Codex when searching ChatGPT Codex', () => {
+    expect(
+      providerOptionMatchesSearch('chatgpt codex', {
+        label: 'OpenAI Codex (openai-codex)',
+        value: 'openai-codex',
+      }),
+    ).toBe(true);
+  });
+
   it('renders form fields and warns when not configured', async () => {
     renderPage({});
     expect(await screen.findByTestId('model-config-page')).toBeTruthy();
@@ -92,12 +105,14 @@ describe('<ModelConfigPage>', () => {
     );
   });
 
-  it('ChatGPT auth button opens the Codex browser authorization URL', async () => {
+  it('ChatGPT auth button opens the Hermes Codex device page and shows the code', async () => {
     const user = userEvent.setup();
     mockedStartChatgptAuth.mockResolvedValue({
-      authorization_url: 'https://auth.openai.com/oauth/authorize?state=abc',
+      authorization_url: 'https://auth.openai.com/codex/device',
+      verification_url: 'https://auth.openai.com/codex/device',
+      user_code: 'ABCD-EFGH',
       process_id: 123,
-      message: 'ok',
+      message: '已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权',
     });
     renderPage({
       provider: 'openai-codex',
@@ -124,14 +139,20 @@ describe('<ModelConfigPage>', () => {
     );
     expect(mockedPut).not.toHaveBeenCalled();
     expect(window.open).toHaveBeenCalledWith(
-      'https://auth.openai.com/oauth/authorize?state=abc',
+      'https://auth.openai.com/codex/device',
       '_blank',
       'noopener,noreferrer',
     );
     await waitFor(() =>
+      expect(messageMock.info).toHaveBeenCalledWith('授权验证码：ABCD-EFGH'),
+    );
+    await waitFor(() =>
       expect(messageMock.success).toHaveBeenCalledWith(
-        '已打开 Codex auth 授权页，请在浏览器中完成授权',
+        '已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权',
       ),
+    );
+    expect((await screen.findByTestId('chatgpt-auth-code')).textContent).toContain(
+      'ABCD-EFGH',
     );
   });
 
@@ -171,6 +192,7 @@ describe('<ModelConfigPage>', () => {
       base_url: 'https://chatgpt.com/backend-api/codex',
       api_mode: 'codex_responses',
       is_chatgpt_auth: true,
+      provider_authorized: true,
       providers: [],
     });
     renderPage({

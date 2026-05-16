@@ -59,11 +59,15 @@ from app.services.management import (
     read_config_yaml,
     reset_active_gateway_sessions,
     selected_provider_transport,
-    start_codex_auth_session,
+    start_hermes_codex_auth_session,
     sync_skills_fs,
     sync_workspace_env,
     validate_workspace_path,
     write_config_yaml,
+)
+from app.services.provider_auth import (
+    provider_authorized,
+    reuse_provider_auth,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +128,7 @@ async def get_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        provider_authorized=await provider_authorized(fs, bot_name, block["provider"]),
         providers=providers,
     )
 
@@ -159,6 +164,8 @@ async def put_model_config(
     await write_config_yaml(fs, bot_name, new_doc)
 
     block = extract_model_block(new_doc)
+    if is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]):
+        await reuse_provider_auth(fs, bot_name)
     providers = await list_model_provider_options(fs, bot_name, new_doc)
     return ModelConfigOut(
         bot_name=bot_name,
@@ -167,6 +174,7 @@ async def put_model_config(
         base_url=block["base_url"],
         api_mode=block["api_mode"],
         is_chatgpt_auth=is_chatgpt_auth(block["provider"], block["api_mode"], block["base_url"]),
+        provider_authorized=await provider_authorized(fs, bot_name, block["provider"]),
         providers=providers,
     )
 
@@ -183,11 +191,13 @@ async def start_chatgpt_auth(
 ) -> ChatgptAuthStartOut:
     fs, _, _ = _state_deps(request)
     await _ensure_known_profile(bot_name, session=session, fs=fs)
-    launch = await anyio.to_thread.run_sync(start_codex_auth_session)
+    launch = await anyio.to_thread.run_sync(start_hermes_codex_auth_session, fs, bot_name)
     return ChatgptAuthStartOut(
         authorization_url=launch["authorization_url"],
         process_id=launch["process_id"],
-        message="已打开 Codex auth 授权页, 请在浏览器中完成 ChatGPT 授权",
+        user_code=launch["user_code"],
+        verification_url=launch["verification_url"],
+        message="已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权",
     )
 
 
@@ -495,6 +505,9 @@ async def get_health(
     doc = await read_config_yaml(fs, bot_name)
     model_block = extract_model_block(doc)
     model_configured = bool(model_block["provider"] and model_block["model"])
+    provider_auth_status = (
+        await provider_authorized(fs, bot_name, model_block["provider"]) if model_configured else False
+    )
 
     cwd = extract_workspace_cwd(doc)
     ws = probe_workspace(cwd)
@@ -542,6 +555,7 @@ async def get_health(
     elif (
         gw.state in ("stopped", "unconfigured", "starting")
         or not model_configured
+        or (model_configured and not provider_auth_status)
         or workspace_status == "warning"
     ):
         overall = "warning"
@@ -551,6 +565,7 @@ async def get_health(
         gateway_state=gw.state,
         gateway_why=gw.why,
         model_configured=model_configured,
+        provider_authorized=provider_auth_status,
         workspace_status=workspace_status,
         skills_enabled=skills_enabled,
         skills_total=skills_total,

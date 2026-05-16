@@ -56,6 +56,9 @@ export interface BotOut {
   why: string;
   last_active_at: string | null;
   created_at: string;
+  domain?: 'feishu' | 'lark';
+  connection_mode?: 'websocket';
+  group_strategy?: 'mention' | 'block' | 'all';
 }
 
 export interface BotCreateIn {
@@ -101,6 +104,10 @@ export interface AppIdCheckResult {
 
 export interface BotSecretResetIn {
   feishu_app_secret: string; // plaintext; backend schema uses SecretStr
+}
+
+export interface BotFeishuPolicyPayload {
+  group_strategy: 'mention' | 'block' | 'all';
 }
 
 export interface BotFeishuCredentialsIn {
@@ -198,6 +205,7 @@ export interface ModelConfigOut {
   base_url: string | null;
   api_mode: string | null;
   is_chatgpt_auth: boolean;
+  provider_authorized: boolean;
   providers: ModelProviderOption[];
 }
 
@@ -212,6 +220,8 @@ export interface ChatgptAuthStartOut {
   authorization_url: string;
   process_id: number;
   message: string;
+  user_code: string | null;
+  verification_url: string | null;
 }
 
 export type WorkspaceStatus = 'ok' | 'warning' | 'error' | 'unset';
@@ -259,6 +269,7 @@ export interface HealthOut {
   gateway_state: GatewayState;
   gateway_why: string;
   model_configured: boolean;
+  provider_authorized: boolean;
   workspace_status: WorkspaceStatus;
   skills_enabled: number;
   skills_total: number;

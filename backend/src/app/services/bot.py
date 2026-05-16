@@ -48,6 +48,8 @@ from app.auth.crypto import decrypt_str, encrypt_str
 from app.models.bot import Bot
 from app.schemas.bot import BotCloneIn, BotCreateIn, BotFeishuCredentialsIn, BotOut, BotRenameIn
 from app.schemas.gateway import GatewayState, GatewayStatusOut
+from app.services.feishu_env import apply_feishu_runtime_env
+from app.services.provider_auth import reuse_provider_auth
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +364,17 @@ class BotService:
         if secret_plain:
             env_dict["FEISHU_APP_SECRET"] = secret_plain
         if env_dict:
+            apply_feishu_runtime_env(
+                env_dict,
+                domain=payload.domain,
+                group_strategy=payload.group_strategy,
+            )
             await self.fs.write_env(payload.name, env_dict)
+
+        try:
+            await reuse_provider_auth(self.fs, payload.name)
+        except Exception:
+            logger.warning("provider auth reuse failed for %s", payload.name, exc_info=True)
 
         return self._to_botout(payload.name, bot, status=BotStatus.GREY, why="未配置 Gateway")
 
@@ -386,6 +398,10 @@ class BotService:
         except IntegrityError as e:
             await self.session.rollback()
             raise DuplicateBotError(payload.new_name) from e
+        try:
+            await reuse_provider_auth(self.fs, payload.new_name)
+        except Exception:
+            logger.warning("provider auth reuse failed for %s", payload.new_name, exc_info=True)
         return self._to_botout(
             payload.new_name, bot, status=BotStatus.GREY, why="克隆完成 — 未配置 Gateway"
         )
@@ -619,18 +635,47 @@ class BotService:
         env_dict = await self.fs.read_env(name)
         env_dict["FEISHU_APP_ID"] = payload.feishu_app_id
         env_dict["FEISHU_APP_SECRET"] = plain
-        env_dict["FEISHU_CONNECTION_MODE"] = "websocket"
-        if payload.domain == "lark":
-            env_dict["FEISHU_DOMAIN"] = "lark"
-        else:
-            env_dict.pop("FEISHU_DOMAIN", None)
-        if payload.group_strategy != "mention":
-            env_dict["FEISHU_GROUP_STRATEGY"] = payload.group_strategy
-        else:
-            env_dict.pop("FEISHU_GROUP_STRATEGY", None)
+        apply_feishu_runtime_env(
+            env_dict,
+            domain=payload.domain,
+            group_strategy=payload.group_strategy,
+        )
         await self.fs.write_env(name, env_dict)
 
         return self._to_botout(name, bot, status=BotStatus.GREY, why="飞书凭证已保存")
+
+    async def update_feishu_policy(self, name: str, group_strategy: str) -> BotOut:
+        """Update only the Feishu group response policy.
+
+        - 404 if bot row missing.
+        - Updates ``bot.group_strategy`` in DB.
+        - Reads existing ``.env``, removes stale ``FEISHU_GROUP_STRATEGY``,
+          then re-applies :func:`apply_feishu_runtime_env` to refresh
+          ``FEISHU_GROUP_POLICY`` + ``FEISHU_REQUIRE_MENTION`` while preserving
+          all other keys (``FEISHU_APP_ID``, ``FEISHU_APP_SECRET``,
+          ``TERMINAL_CWD``, ``UNRELATED_*`` etc).
+        """
+        bot = (await self.session.scalars(select(Bot).where(Bot.name == name))).first()
+        if bot is None:
+            raise BotNotFoundError(name)
+
+        bot.group_strategy = group_strategy
+        bot.updated_at = datetime.now(UTC)
+        await self.session.commit()
+        await self.session.refresh(bot)
+
+        env_dict = await self.fs.read_env(name)
+        # apply_feishu_runtime_env already pops FEISHU_GROUP_STRATEGY and sets
+        # POLICY/REQUIRE_MENTION. Pass the bot's current domain so DOMAIN key
+        # stays consistent (lark vs feishu).
+        apply_feishu_runtime_env(
+            env_dict,
+            domain=bot.domain or "feishu",
+            group_strategy=group_strategy,
+        )
+        await self.fs.write_env(name, env_dict)
+
+        return self._to_botout(name, bot, status=BotStatus.GREY, why="群聊策略已更新")
 
     async def reset_secret(self, name: str, new_secret: SecretStr) -> BotOut:
         """FEISHU-04: replace ``feishu_app_secret_enc`` in DB and rewrite ``.env``.

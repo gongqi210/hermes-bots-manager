@@ -6,6 +6,7 @@ import { apiClient } from '@/api/client';
 import type {
   AppIdCheckResult,
   BotFeishuCredentialsIn,
+  BotFeishuPolicyPayload,
   BotOut,
   BotSecretResetIn,
 } from '@/api/types';
@@ -23,6 +24,17 @@ export async function updateFeishuCredentials(
 ): Promise<BotOut> {
   const res = await apiClient.patch<BotOut>(
     `/bots/${encodeURIComponent(name)}/feishu-credentials`,
+    payload,
+  );
+  return res.data;
+}
+
+export async function updateBotFeishuPolicy(
+  name: string,
+  payload: BotFeishuPolicyPayload,
+): Promise<BotOut> {
+  const res = await apiClient.patch<BotOut>(
+    `/bots/${encodeURIComponent(name)}/feishu-policy`,
     payload,
   );
   return res.data;

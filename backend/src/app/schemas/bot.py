@@ -120,6 +120,16 @@ class BotFeishuCredentialsIn(BaseModel):
     group_strategy: Literal["mention", "block", "all"] = "mention"
 
 
+class BotFeishuPolicyIn(BaseModel):
+    """Body for ``PATCH /api/v1/bots/{name}/feishu-policy``.
+
+    Live-edit the Feishu group response policy after a Bot is created.
+    The App Secret is NOT in this body — it stays untouched in DB + ``.env``.
+    """
+
+    group_strategy: Literal["mention", "block", "all"]
+
+
 class BotSecretResetIn(BaseModel):
     """Body for ``PATCH /api/v1/bots/{name}/secret`` (FEISHU-04).
 

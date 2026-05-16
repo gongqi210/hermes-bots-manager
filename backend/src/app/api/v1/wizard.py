@@ -3,11 +3,12 @@
 Routes:
   GET  /bots/check-app-id            App ID uniqueness check (FEISHU-05)
   GET  /bots/{name}/wizard/run       SSE stream — 7-step wizard (FEISHU-02)
+  PATCH /bots/{name}/feishu-policy   Live-edit group response policy
   PATCH /bots/{name}/secret          Reset App Secret (FEISHU-04)
 
 Auth:
   - check-app-id, run_wizard: any authenticated user (Viewer+)
-  - reset_secret: Editor+
+  - feishu-policy, reset_secret: Editor+
 
 Route ordering note:
   ``/check-app-id`` MUST be registered BEFORE ``/{name}/wizard/run`` — FastAPI
@@ -40,7 +41,12 @@ from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.db.session import get_session, get_sessionmaker
 from app.models.bot import Bot
-from app.schemas.bot import BotFeishuCredentialsIn, BotOut, BotSecretResetIn
+from app.schemas.bot import (
+    BotFeishuCredentialsIn,
+    BotFeishuPolicyIn,
+    BotOut,
+    BotSecretResetIn,
+)
 from app.services.bot import AppIdConflictError, BotNotFoundError, BotService
 from app.services.lark_cli import extract_open_feishu_url, stream_lark_init_lines
 from app.services.wizard import WizardService
@@ -264,6 +270,23 @@ async def lark_app_init(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.patch("/{name}/feishu-policy", response_model=BotOut)
+async def update_feishu_policy(
+    name: str,
+    payload: BotFeishuPolicyIn,
+    _user: dict[str, Any] = Depends(require_role(Role.EDITOR)),
+    service: BotService = Depends(_get_bot_service),
+) -> BotOut:
+    """Live-edit the Feishu group response policy without re-entering Secret."""
+    try:
+        return await service.update_feishu_policy(name, payload.group_strategy)
+    except BotNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot '{name}' 不存在",
+        ) from None
 
 
 @router.patch("/{name}/secret", response_model=BotOut)

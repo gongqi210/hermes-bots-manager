@@ -81,6 +81,25 @@ def _profile_sessions_index_path(name: str) -> Path:
     return HERMES_HOME / "profiles" / name / "sessions" / "sessions.json"
 
 
+def _profile_auth_path(name: str) -> Path:
+    return HERMES_HOME / "profiles" / name / "auth.json"
+
+
+def _auth_json(provider_token: str = "token-src") -> str:
+    return (
+        '{'
+        '"version":1,'
+        '"providers":{"openai-codex":{"tokens":{"access_token":"'
+        + provider_token
+        + '"},"auth_mode":"chatgpt"}},'
+        '"active_provider":"openai-codex",'
+        '"credential_pool":{"openai-codex":[{"id":"pool1","access_token":"'
+        + provider_token
+        + '","source":"device_code"}]}'
+        '}'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Model config
 # ---------------------------------------------------------------------------
@@ -103,6 +122,7 @@ async def test_model_config_get_empty(
         "base_url": None,
         "api_mode": None,
         "is_chatgpt_auth": False,
+        "provider_authorized": False,
         "providers": [],
     }
 
@@ -129,6 +149,31 @@ async def test_model_config_put_chatgpt_auth_marks_flag(
     assert written["model"]["provider"] == "openai-codex"
     assert written["model"]["default"] == "gpt-5.5"
     assert written["feishu"]["domain"] == "feishu"  # preserved
+
+
+async def test_model_config_put_chatgpt_auth_reuses_default_profile_auth(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot(session)
+    fake_host.fs[HERMES_HOME / "auth.json"] = _auth_json("default-token")
+    fake_host.fs[_profile_config_path("foo")] = "feishu:\n  domain: feishu\n"
+    token = await _bootstrap_owner(client)
+
+    r = await client.put(
+        "/api/v1/bots/foo/model-config",
+        json={
+            "provider": "openai-codex",
+            "model": "gpt-5.5",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["provider_authorized"] is True
+    copied = yaml.safe_load(fake_host.fs[_profile_auth_path("foo")])
+    assert copied["providers"]["openai-codex"]["tokens"]["access_token"] == "default-token"
+    assert copied["credential_pool"]["openai-codex"][0]["access_token"] == "default-token"
 
 
 async def test_model_config_put_preserves_unknown_keys(
@@ -166,7 +211,7 @@ async def test_model_config_viewer_cannot_put(
     assert r.status_code == 403
 
 
-async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
+async def test_chatgpt_auth_start_launches_hermes_codex_without_writing_model_config(
     client: AsyncClient,
     fake_host: InMemoryHostOps,
     session: AsyncSession,
@@ -178,16 +223,18 @@ async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
     fake_host.fs[_profile_config_path("foo")] = "feishu:\n  domain: feishu\n"
     token = await _bootstrap_owner(client)
 
-    def fake_start_codex_auth_session() -> dict[str, int | str]:
+    def fake_start_hermes_codex_auth_session(*args: Any) -> dict[str, int | str | None]:
         return {
-            "authorization_url": "https://auth.openai.com/oauth/authorize?state=test",
+            "authorization_url": "https://auth.openai.com/codex/device",
+            "verification_url": "https://auth.openai.com/codex/device",
+            "user_code": "ABCD-EFGH",
             "process_id": 123,
         }
 
     monkeypatch.setattr(
         management_api,
-        "start_codex_auth_session",
-        fake_start_codex_auth_session,
+        "start_hermes_codex_auth_session",
+        fake_start_hermes_codex_auth_session,
     )
     r = await client.post(
         "/api/v1/bots/foo/model-config/chatgpt-auth/start",
@@ -195,9 +242,11 @@ async def test_chatgpt_auth_start_launches_codex_without_writing_model_config(
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["authorization_url"] == "https://auth.openai.com/oauth/authorize?state=test"
+    assert body["authorization_url"] == "https://auth.openai.com/codex/device"
+    assert body["verification_url"] == "https://auth.openai.com/codex/device"
+    assert body["user_code"] == "ABCD-EFGH"
     assert body["process_id"] == 123
-    assert "Codex auth" in body["message"]
+    assert "Hermes Codex" in body["message"]
     assert yaml.safe_load(fake_host.fs[_profile_config_path("foo")]) == {
         "feishu": {"domain": "feishu"}
     }
@@ -460,6 +509,34 @@ async def test_health_combines_signals(
     # Gateway not started in test → state should be stopped/unconfigured.
     assert body["gateway_state"] in {"stopped", "unconfigured"}
     assert body["overall"] in {"warning", "error"}
+
+
+async def test_health_reports_provider_auth_status(
+    client: AsyncClient, fake_host: InMemoryHostOps, session: AsyncSession
+) -> None:
+    await _seed_bot(session)
+    fake_host.fs[_profile_config_path("foo")] = (
+        "model:\n  provider: openai-codex\n  default: gpt-5.5\n"
+        "  base_url: https://chatgpt.com/backend-api/codex\n"
+        "  api_mode: codex_responses\n"
+    )
+    token = await _bootstrap_owner(client)
+
+    missing = await client.get(
+        "/api/v1/bots/foo/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert missing.status_code == 200, missing.text
+    assert missing.json()["model_configured"] is True
+    assert missing.json()["provider_authorized"] is False
+
+    fake_host.fs[_profile_auth_path("foo")] = _auth_json("target-token")
+    authorized = await client.get(
+        "/api/v1/bots/foo/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert authorized.status_code == 200, authorized.text
+    assert authorized.json()["provider_authorized"] is True
 
 
 # ---------------------------------------------------------------------------

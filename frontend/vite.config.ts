@@ -12,8 +12,8 @@ export default defineConfig({
     port: 5710,
     proxy: {
       // Backend lives on :8710 in dev (chosen to avoid common-port collisions).
-      '/api': { target: 'http://localhost:8710', ws: true, changeOrigin: true },
-      '/ws': { target: 'ws://localhost:8710', ws: true, changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:8710', ws: true, changeOrigin: true },
+      '/ws': { target: 'ws://127.0.0.1:8710', ws: true, changeOrigin: true },
     },
   },
 });

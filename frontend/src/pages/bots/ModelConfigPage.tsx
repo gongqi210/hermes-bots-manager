@@ -15,14 +15,14 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getModelConfig,
   putModelConfig,
   startChatgptAuth,
 } from '@/api/management';
-import type { ModelConfigUpdateIn } from '@/api/types';
+import type { ChatgptAuthStartOut, ModelConfigUpdateIn } from '@/api/types';
 import { zhCN } from '@/i18n/zh-CN';
 import { extractErrorMessage } from '@/utils/errors';
 import HealthSummary from './HealthSummary';
@@ -39,6 +39,7 @@ interface FormValues {
 export default function ModelConfigPage({ botName }: { botName: string }) {
   const qc = useQueryClient();
   const [form] = Form.useForm<FormValues>();
+  const [authLaunch, setAuthLaunch] = useState<ChatgptAuthStartOut | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['model-config', botName],
@@ -103,6 +104,7 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
   const chatgptM = useMutation({
     mutationFn: () => startChatgptAuth(botName),
     onSuccess: (result) => {
+      setAuthLaunch(result);
       window.open(result.authorization_url, '_blank', 'noopener,noreferrer');
       if (result.user_code) {
         message.info(`授权验证码：${result.user_code}`);
@@ -173,6 +175,30 @@ export default function ModelConfigPage({ botName }: { botName: string }) {
                 >
                   {zhCN.modelConfig.chatgptAuthBtn}
                 </Button>
+                {authLaunch?.user_code && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    data-testid="chatgpt-auth-code"
+                    message={
+                      <Space direction="vertical" size={4}>
+                        <Typography.Text strong>
+                          授权验证码：{authLaunch.user_code}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">
+                          在打开的 OpenAI 页面输入此验证码；如果页面已关闭，重新打开{' '}
+                          <Typography.Link
+                            href={authLaunch.verification_url ?? authLaunch.authorization_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            授权页面
+                          </Typography.Link>
+                        </Typography.Text>
+                      </Space>
+                    }
+                  />
+                )}
               </Space>
             )}
             {!isLoading && providers.length === 0 && (

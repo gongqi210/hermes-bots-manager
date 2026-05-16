@@ -151,6 +151,9 @@ describe('<ModelConfigPage>', () => {
         '已启动 Hermes Codex 授权, 请在浏览器中输入验证码完成 ChatGPT 授权',
       ),
     );
+    expect((await screen.findByTestId('chatgpt-auth-code')).textContent).toContain(
+      'ABCD-EFGH',
+    );
   });
 
   it('shows ChatGPT auth tag when backend reports is_chatgpt_auth', async () => {

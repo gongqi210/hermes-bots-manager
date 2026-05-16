@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,6 +58,11 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Allowed Origin headers on /ws/gateway/.../logs upgrades. Empty = skip.",
     )
+
+    @field_validator("master_key_path", "hermes_home", "archive_dir", mode="before")
+    @classmethod
+    def expand_user_paths(cls, value: str | Path) -> Path:
+        return Path(value).expanduser()
 
 
 _settings: Settings | None = None
